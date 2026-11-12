@@ -213,3 +213,7 @@ Startup validation on November 11, 2026: a project-specific current-user startup
 ## Repository contents
 
 This repository contains application source, UI assets, setup scripts and synthetic test fixtures. Downloaded AI/voice models, installed dependencies, household records, credentials, runtime logs, and local validation notes are excluded. Copy `.env.example` to `.env.local` to configure a new installation. Existing household installations should keep their private directory and .env.local intact when updating the code. A source checkout is not a ready-to-run offline bundle; follow the installation steps above to install dependencies and download models.
+
+## Complete installed backup
+
+The [private full Windows backup release](https://github.com/Faith-House/faithhousegcws/releases/tag/windows-backup-2026-11-12) contains software/models/dependencies, Windows runtimes, the active Ollama model, and a separate household-data snapshot including enrolled voice templates. Download all assets and follow BACKUP-README.md. These large installed files are release attachments, not ordinary Git files. Active credentials remain excluded; reconnect authorized services locally. The household-data archive is private house data and should stay inside authorized backups.
