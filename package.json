@@ -1,0 +1,24 @@
+{
+  "name": "jarvis-local-prototype",
+  "version": "0.7.0",
+  "private": true,
+  "description": "A minimal, local Jarvis HUD connected to Ollama.",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node --env-file-if-exists=.env.local server.mjs",
+    "test": "node --test tests/listening.test.mjs tests/profiles.test.mjs tests/speaker-context.test.mjs tests/speaker-real.test.mjs tests/visual.test.mjs tests/dashboard.test.mjs tests/tv-dashboard.test.mjs tests/command-intents.test.mjs tests/reminders.test.mjs tests/tool-agent.test.mjs tests/voice-options.test.mjs tests/speech-stream.test.mjs tests/interruptions.test.mjs tests/web-search.test.mjs tests/diagnostics.test.mjs tests/tool-activity.test.mjs tests/chores.test.mjs tests/weather.test.mjs tests/supervisor.test.mjs",
+    "check": "node --check server.mjs && node --check speech.mjs && node --check wakeword.mjs && node --check wakeword-engine.mjs && node --check wakeword-worker.mjs && node --check profiles.mjs && node --check speaker-context.mjs && node --check speaker-id.mjs && node --check speaker-worker.mjs && node --check public/profiles.js && node --check public/hud.js && node --check public/microphone.js && node --check public/wakeword.js && node --check public/speech.js && node --check public/orb.js && node --check public/display.js && node --check public/dashboard.js && node --check system-health.mjs && node --check public/tv-dashboard.js && node --check command-intents.mjs && node --check reminders.mjs && node --check google-calendar.mjs && node --check public/reminders.js && node --check public/agenda.js && node --check tool-agent.mjs && node --check house-tools.mjs && node --check public/tools.js && node --check pocket-speech.mjs && node --check speech-stream.mjs && node --check public/interruptions.js && node --check web-search.mjs && node --check public/search-sources.js && node --check diagnostics.mjs && node --check public/diagnostics.js && node --check tool-activity.mjs && node --check chores.mjs && node --check public/chores.js && node --check weather.mjs && node --check public/weather.js && node --check public/weather-view.js && node --check supervisor.mjs && node --check startup-status.mjs"
+  },
+  "dependencies": {
+    "@huggingface/transformers": "3.8.1",
+    "kokoro-js": "1.2.1",
+    "onnxruntime-node": "1.21.0",
+    "ws": "8.22.1"
+  },
+  "overrides": {
+    "sharp": "0.35.5"
+  }
+}

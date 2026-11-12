@@ -1,0 +1,5 @@
+[
+  { "label": "Living room lamp", "entityId": "light.living_room_lamp", "aliases": ["living room lamp", "lamp"], "operations": ["turn_on", "turn_off", "brightness", "status"], "access": "shared" },
+  { "label": "Living room TV", "entityId": "media_player.living_room_tv", "aliases": ["living room tv", "tv"], "operations": ["turn_on", "turn_off", "media_pause", "media_play", "volume_mute", "status"], "access": "shared" },
+  { "label": "Bedroom lamp", "entityId": "light.bedroom_lamp", "aliases": ["bedroom lamp"], "operations": ["turn_on", "turn_off", "status"], "access": "private" }
+]

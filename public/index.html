@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#030201">
+  <meta name="description" content="Your minimal local Jarvis assistant.">
+  <title>Jarvis</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/hud.css">
+  <script type="module" src="/hud.js"></script>
+<link rel="stylesheet" href="/weather.css"></head>
+<body data-state="idle">
+  <main id="hud" class="hud" aria-label="Jarvis assistant">
+    <div id="visual" class="visual" aria-hidden="true"><canvas id="orb"></canvas></div>
+    <div id="response" class="response" hidden>
+      <p id="answer" class="answer" aria-live="polite" aria-atomic="false"></p>
+      <section id="search-sources" class="search-sources" aria-label="Web search sources" hidden></section>
+      <a id="weather-link" class="text-link" href="/weather" hidden>Weather location and forecast ↗</a>
+      <a id="chores-link" class="text-link" href="/chores" hidden>Open household chores ↗</a>
+      <a id="activity-link" class="text-link" href="/activity" hidden>Open tool activity ↗</a>
+      <p id="answer-note" class="answer-note" hidden></p>
+      <p id="voice-notice" class="voice-notice" role="status" hidden></p>
+      <p id="speaker-notice" class="voice-notice" hidden></p>
+    </div>
+    <section id="weather-preview" class="weather-preview" aria-label="Weather forecast" hidden></section>
+<p id="status" class="sr-only" role="status">Jarvis is ready.</p>
+  </main>
+  <audio id="speech-audio" preload="none" hidden></audio>
+  <audio id="wake-audio" src="/wake-chime.wav" preload="auto" hidden></audio>
+  <div id="listening-indicator" class="listening-indicator" hidden><span class="listening-dot" aria-hidden="true"></span><span id="listening-label" role="status"></span><button id="stop-listening" type="button">Stop listening</button></div>
+  <audio id="timer-audio" src="/timer-chime.wav" preload="none" hidden></audio>
+  <aside id="timer-alert" class="timer-alert" aria-label="Timer alert" hidden><span id="timer-message" role="status"></span><button id="timer-sound" type="button" hidden>Play chime</button><button id="dismiss-timer" type="button">Dismiss</button></aside>
+  <div id="playback-controls" class="playback-controls" hidden>
+    <button id="hear-reply" type="button" hidden>Hear reply</button>
+    <button id="stop-speech" type="button" hidden>Stop speaking</button>
+    <button id="mute-speech" type="button" hidden>Mute voice</button>
+  </div>
+  <div id="connection" class="connection" role="status" hidden>Reconnecting to Jarvis…</div>
+  <p id="hint" class="hint">Press <kbd>Enter</kbd> to ask Jarvis</p>
+  <button id="ask-button" class="ask-button" aria-label="Ask Jarvis" aria-controls="composer" aria-expanded="false">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7h14M5 12h10M5 17h6"/></svg>
+    <span>Ask Jarvis</span>
+  </button>
+  <section id="composer" class="composer" aria-label="Ask Jarvis" hidden>
+    <div class="composer-meta">
+      <label for="room">Room</label>
+      <select id="room" aria-label="Select room">
+        <option value="bedroom-1">Bedroom 1</option>
+        <option value="bedroom-2">Bedroom 2</option>
+        <option value="bedroom-3">Bedroom 3</option>
+        <option value="bedroom-4">Bedroom 4</option>
+        <option value="living-room">Living room</option>
+      </select>
+      <select id="profile" aria-label="Roommate profile"><option value="">Shared profile</option></select>
+      <span class="prototype-label">Local assistant</span>
+      <button id="close-composer" class="icon-button" aria-label="Close question input">×</button>
+    </div>
+    <form id="question-form" class="question-form">
+      <label class="sr-only" for="question">Your question</label>
+      <textarea id="question" rows="1" maxlength="600" placeholder="Ask me anything…" autocomplete="off" spellcheck="true" required></textarea>
+      <button id="send" class="send-button" type="submit" aria-label="Send question"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6"/></svg></button>
+    </form>
+    <div class="microphone-settings">
+      <button id="microphone" type="button" aria-pressed="false" disabled>Talk to Jarvis</button>
+      <select id="microphone-device" aria-label="Microphone"><option value="">Default microphone</option></select>
+      <button id="cancel-microphone" type="button" hidden>Cancel recording</button>
+    </div>
+    <div id="microphone-progress" class="microphone-progress" hidden><meter id="microphone-level" min="0" max="1" value="0" aria-label="Microphone input level"></meter><span id="microphone-time"></span></div>
+    <p id="microphone-notice" class="microphone-notice" role="status" hidden></p>
+    <label class="speaker-toggle"><input id="identify-speaker" type="checkbox" checked disabled>Recognize who is speaking <span id="speaker-availability">Set up voices in Profiles</span></label>
+    <div class="wake-settings"><button id="wake-toggle" type="button" aria-pressed="false" disabled>Enable “Hey Jarvis”</button><span id="wake-help">Say Hey Jarvis to ask or interrupt. Say Hey Jarvis, stop to end a reply. Keep this page open.</span></div>
+    <label class="speaker-toggle"><input id="allow-interruptions" type="checkbox" checked>Allow voice interruptions <span>Say Hey Jarvis while he speaks</span></label>
+    <div class="speech-settings">
+      <label class="speech-toggle"><input id="voice-enabled" type="checkbox" checked>Spoken replies</label>
+      <select id="voice" aria-label="Voice" disabled><option>Loading voices…</option></select>
+      <button id="test-voice" type="button" disabled>Test voice</button>
+      <button id="refresh-voices" type="button">Refresh voices</button>
+    </div>
+    <p id="voice-availability" class="voice-availability" hidden></p>
+    <div class="composer-footer"><span>Enter to send · Esc to dismiss</span><a href="/profiles">Profiles</a><a href="/weather">Weather</a><a href="/chores">Chores</a><a href="/activity">Tool activity</a><a href="/diagnostics">Diagnostics</a><a href="/setup">House setup</a><button id="reset" type="button">New conversation</button></div>
+    <p id="form-error" class="form-error" role="alert" hidden></p>
+  </section>
+</body>
+</html>

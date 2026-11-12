@@ -1,0 +1,27 @@
+# Downloads and generated environments
+node_modules/
+models/
+.pocket-venv/
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+
+# Household data, credentials and machine configuration
+private/
+.env*
+!.env.example
+*.pem
+*.key
+*.pfx
+*.p12
+
+# Local previews, technical logs and historical machine notes
+work/
+VALIDATION.md
+coverage/
+*.log
+*.part
+*.tmp
+.DS_Store
+Thumbs.db
