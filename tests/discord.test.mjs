@@ -34,8 +34,8 @@ test('Discord configuration persists credentials privately, redacts responses, v
  const broken=await dir();await writeFile(path.join(broken,'discord.json'),'original broken file');const other=createDiscordConfig({directory:broken,profiles,rooms:roomIds});assert.equal((await other.status()).configurationError,true);await assert.rejects(other.configure(configuration));assert.equal(await readFile(path.join(broken,'discord.json'),'utf8'),'original broken file');
 });
 
-function sdkFixture(){let client,registered;
- class Client extends EventEmitter{constructor(options){super();this.options=options;this.application={id:appId};this.user={id:appId,tag:'Jarvis test'};this.guilds={fetch:async id=>{assert.equal(id,guildId);return{commands:{create:async command=>{registered=command;}}};}};}async login(){queueMicrotask(()=>this.emit('ready'));return token;}isReady(){return true;}destroy(){this.destroyed=true;}}
+function sdkFixture({channelMissing=false,channelType=0,channelPermissions=true}={}){let client,registered;
+ class Client extends EventEmitter{constructor(options){super();this.options=options;this.application={id:appId};this.user={id:appId,tag:'Jarvis test'};this.guilds={fetch:async id=>{assert.equal(id,guildId);return{channels:{fetch:async id=>{if(channelMissing)throw Error('Unknown channel');return{id,guildId,type:channelType,permissionsFor:()=>({has:()=>channelPermissions})};}},commands:{create:async command=>{registered=command;}}};}};}async login(){queueMicrotask(()=>this.emit('ready'));return token;}isReady(){return true;}destroy(){this.destroyed=true;}}
  const sdk={Client:class extends Client{constructor(options){super(options);client=this;}},GatewayIntentBits:{Guilds:1,GuildVoiceStates:128,GuildMessages:512,MessageContent:32768},Events:{ClientReady:'ready',InteractionCreate:'interaction',MessageCreate:'messageCreate',Error:'error',Invalidated:'invalidated'}};
  return{sdk,getClient:()=>client,command:()=>registered};
 }
@@ -181,4 +181,12 @@ test('direct conversation uses ordinary local chat with history instead of a sil
  const decide=createDiscordTextModel({fetchImpl:async(url,options)=>{body=JSON.parse(options.body);return{ok:true,json:async()=>({message:{content:'Try chicken fried rice.'}})};}});
  const result=await decide({history:[{speaker:'cooper',text:'Any dinner ideas?'},{speaker:'Jarvis',text:'What ingredients do you have?'}],message:{speaker:'cooper',text:'Chicken and rice'},directed:true,signal:new AbortController().signal});
  assert.equal(result.respond,true);assert.equal(result.toolRequest,false);assert.equal(result.answer,'Try chicken fried rice.');assert.equal(body.format,undefined);assert.equal(body.messages.at(-1).content,'Chicken and rice');assert.equal(body.messages[2].role,'assistant');
+});
+
+test('Discord connection rejects missing channels, categories and missing reply permissions with useful errors',async()=>{
+ for(const [options,expected] of [[{channelMissing:true},/could not be found/],[{channelType:4},/regular text/],[{channelPermissions:false},/Read Message History/]]){
+  const fixture=sdkFixture(options),service=createDiscordIntegration({directory:await dir(),profiles,rooms:roomIds,bridge:{close(){}},loadSdk:async()=>fixture.sdk,voiceFactory:async()=>({close:async()=>{}})});
+  await service.configure({...configuration,textChannelIds:[channelId]});const status=await service.connect();
+  assert.equal(status.connected,false);assert.match(status.error,expected);assert.equal(fixture.command(),undefined);await service.close();
+ }
 });

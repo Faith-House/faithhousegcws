@@ -41,12 +41,18 @@ export function createDiscordIntegration({directory,profiles,rooms,bridge,loadSd
     if(stopped||epoch!==attempt){candidate.destroy();return status();}
     if(candidate.application.id!==config.applicationId)throw Error('Wrong application');
     const guild=await candidate.guilds.fetch(config.guildId);
+    for(const id of config.textChannelIds){
+     let channel;
+     try{channel=await guild.channels.fetch(id);}catch{throw Object.assign(Error(),{setupDetail:`Text channel ${id} could not be found or accessed. Copy the ID of a text channel in the selected server, then save and reconnect.`});}
+     if(!channel||channel.guildId!==config.guildId||![0,5].includes(channel.type))throw Object.assign(Error(),{setupDetail:`Channel ${id} must be a regular text or announcement channel in the selected server, rather than a category, forum or voice channel.`});
+     if(!channel.permissionsFor(candidate.user)?.has(['ViewChannel','SendMessages','ReadMessageHistory']))throw Object.assign(Error(),{setupDetail:`Jarvis needs View Channel, Send Messages and Read Message History in text channel ${id}. Update its channel permissions, then reconnect.`});
+    }
     await guild.commands.create(jarvisCommand);
     voice=await voiceFactory({client:candidate,guildId:config.guildId,voiceChannelIds:config.voiceChannelIds,members:config.members,bridge,onAnswer:remember,onState:state=>{voiceState=state;}});
     if(stopped||epoch!==attempt){await voice.close();voice=null;candidate.destroy();return status();}
     text=createDiscordText({guildId:config.guildId,channelIds:config.textChannelIds,members:config.members,profiles,bridge,decide:textDecide,botId:candidate.user.id,onAnswer:remember,now,isCurrent:()=>client===candidate&&connectionState==='connected',onError:message=>{lastError=message;}});
     await store.setEnabled(true);connectionState='connected';detail=config.textChannelIds.length?'Connected. Natural conversation is enabled in approved text channels.':'Connected. Slash commands are registered in the selected server.';return status();
-   }catch{await disconnect({rememberDisabled:false});connectionState='error';detail='Discord connection could not finish.';lastError='Check the bot token, matching application ID, server invite and bot permissions. For natural text chat, enable Message Content Intent in Developer Portal / Bot, then reconnect.';return status();}
+   }catch(error){await disconnect({rememberDisabled:false});connectionState='error';detail='Discord connection could not finish.';lastError=error.setupDetail||'Check the bot token, matching application ID, server invite and bot permissions. For natural text chat, enable Message Content Intent in Developer Portal / Bot, then reconnect.';return status();}
   })().finally(()=>{connecting=null;});return connecting;
  }
  async function configure(input){await store.configure(input);await disconnect({rememberDisabled:false});lastError='';return status();}
