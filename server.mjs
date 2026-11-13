@@ -1,3 +1,5 @@
+import { createDiscordIntegration } from './discord-integration.mjs';
+import { createDiscordBridge } from './discord-bridge.mjs';
 import { createPhoneAccess } from './phone-access.mjs';
 import { createTvAutolaunch } from './tv-autolaunch.mjs';
 import { createSamsungLauncher } from './samsung-launcher.mjs';
@@ -37,6 +39,9 @@ import { createWebSearch, isSearchRequest } from './web-search.mjs';
 export const ROOMS = ['bedroom-1', 'bedroom-2', 'bedroom-3', 'bedroom-4', 'living-room'];
 const publicRoot = new URL('./public/', import.meta.url);
 const assets = new Map([
+  ['/discord', ['discord.html', 'text/html; charset=utf-8']],
+  ['/discord.js', ['discord.js', 'text/javascript; charset=utf-8']],
+  ['/discord.css', ['discord.css', 'text/css; charset=utf-8']],
   ['/phones', ['phones.html', 'text/html; charset=utf-8']],
   ['/phones.js', ['phones.js', 'text/javascript; charset=utf-8']],
   ['/tv-launch', ['tv-launch.html', 'text/html; charset=utf-8']],
@@ -141,7 +146,7 @@ function unavailableConnection(question) {
   return null;
 }
 
-export function createJarvisServer({ model = process.env.JARVIS_MODEL || 'qwen3:0.6b', ollamaUrl = process.env.JARVIS_OLLAMA_URL || 'http://127.0.0.1:11434', requestTimeoutMs = 60000, speech = createLocalSpeech(), recognition = createLocalRecognition(), actionsOptions = {}, homeAssistant = createHomeAssistant(), displayBind = process.env.JARVIS_DISPLAY_BIND || '', pairingOptions = {}, wakeword = createWakeWordService(), profiles = createProfiles({ directory: actionsOptions.dataDirectory }), speakerId = createSpeakerIdentification(), webSearch = createWebSearch({ model, ollamaUrl }), diagnosticsOptions = {}, weatherOptions = {}, codingModel = process.env.JARVIS_CODING_MODEL || '', codingContext = process.env.JARVIS_CODING_CONTEXT || 8192, codingOutput = process.env.JARVIS_CODING_OUTPUT || 2048, codingTimeoutMs = 180000, tvLaunchOptions = {}, phoneBind = process.env.JARVIS_PHONE_BIND || '', phonePort = Number(process.env.JARVIS_PHONE_PORT || 3215), phoneSetupPort = Number(process.env.JARVIS_PHONE_SETUP_PORT || 3214) } = {}) {
+export function createJarvisServer({ model = process.env.JARVIS_MODEL || 'qwen3:0.6b', ollamaUrl = process.env.JARVIS_OLLAMA_URL || 'http://127.0.0.1:11434', requestTimeoutMs = 60000, speech = createLocalSpeech(), recognition = createLocalRecognition(), actionsOptions = {}, homeAssistant = createHomeAssistant(), displayBind = process.env.JARVIS_DISPLAY_BIND || '', pairingOptions = {}, wakeword = createWakeWordService(), profiles = createProfiles({ directory: actionsOptions.dataDirectory }), speakerId = createSpeakerIdentification(), webSearch = createWebSearch({ model, ollamaUrl }), diagnosticsOptions = {}, weatherOptions = {}, codingModel = process.env.JARVIS_CODING_MODEL || '', codingContext = process.env.JARVIS_CODING_CONTEXT || 8192, codingOutput = process.env.JARVIS_CODING_OUTPUT || 2048, codingTimeoutMs = 180000, tvLaunchOptions = {}, phoneBind = process.env.JARVIS_PHONE_BIND || '', phonePort = Number(process.env.JARVIS_PHONE_PORT || 3215), phoneSetupPort = Number(process.env.JARVIS_PHONE_SETUP_PORT || 3214), discordOptions = {} } = {}) {
   const state = new Map(ROOMS.map(room => [room, initialState()]));
   const conversation = createConversation();
   const undoHistory = createUndoHistory();
@@ -230,6 +235,8 @@ export function createJarvisServer({ model = process.env.JARVIS_MODEL || 'qwen3:
     try { caFingerprint = new X509Certificate(await readFile(`${phoneDirectory}/tls/ca.pem`)).fingerprint256; } catch {}
     return { ...await phonePairing.list(), enabled: Boolean(phoneAccess?.server.listening && phoneAccess?.bootstrap.listening), url: phoneAccess?.server.listening ? phoneAccess.url : null, setupUrl: phoneAccess?.bootstrap.listening ? phoneAccess.setupUrl : null, caFingerprint, error: phoneError, configured: Boolean(phoneBind) };
   }
+  const discord = createDiscordIntegration({ directory: actionsOptions.dataDirectory || `${APP_ROOT}/private`, profiles, rooms: ROOMS,
+    bridge: createDiscordBridge({ baseUrl: () => `http://127.0.0.1:${server.address().port}/` }), ...discordOptions });
   const toolContext = (room, profileId, question = '', view = 'minimal', signal) => ({ room, profileId: profileId || null, question, view, signal, timeZone: process.env.JARVIS_TIMEZONE || 'America/Chicago' });
 
   let modelCheck, modelCache;
@@ -602,6 +609,10 @@ export function createJarvisServer({ model = process.env.JARVIS_MODEL || 'qwen3:
         response.writeHead(200, { 'Content-Type': mime, 'Cache-Control': 'no-cache' });
         return response.end(file);
       }
+      if (request.method === 'GET' && url.pathname === '/api/discord') return json(response, 200, await discord.status());
+      if (request.method === 'POST' && url.pathname === '/api/discord') return json(response, 200, await discord.configure(await readJson(request)));
+      if (request.method === 'POST' && url.pathname === '/api/discord/connect') { await readJson(request); return json(response, 200, await discord.connect()); }
+      if (request.method === 'POST' && url.pathname === '/api/discord/disconnect') { await readJson(request); await discord.disconnect(); return json(response, 200, await discord.status()); }
       if (request.method === 'GET' && url.pathname === '/api/phones') return json(response, 200, await phoneStatus());
       if (request.method === 'POST' && url.pathname === '/api/phones/pairing') {
         const body = await readJson(request);
@@ -941,6 +952,7 @@ export function createJarvisServer({ model = process.env.JARVIS_MODEL || 'qwen3:
   });
 
   async function shutdown() {
+    await discord.close();
     phoneClosed = true; await phoneStarting; await phoneAccess?.close(); await phonePairing.close();
     speakerTurns.close();
     speakerId.close?.();
@@ -962,7 +974,7 @@ export function createJarvisServer({ model = process.env.JARVIS_MODEL || 'qwen3:
     for (const roomClients of clients.values()) for (const client of roomClients) client.end();
     await new Promise(resolve => server.close(resolve));
   }
-  return { server, displayServer: displayServer?.server, shutdown, startPhoneAccess };
+  return { server, displayServer: displayServer?.server, shutdown, startPhoneAccess, startDiscord: () => discord.start() };
 }
 
 if (process.argv[1] && pathToFileURL(fileURLToPath(import.meta.url)).href === pathToFileURL(process.argv[1]).href) {
@@ -975,6 +987,7 @@ if (process.argv[1] && pathToFileURL(fileURLToPath(import.meta.url)).href === pa
   app.server.listen(port, '127.0.0.1', () => {
     console.log(`Jarvis is ready: http://127.0.0.1:${port}`);
     void app.startPhoneAccess();
+    void app.startDiscord().catch(() => {});
     console.log('Press Enter on the page to ask a question. Press Escape to dismiss.');
     console.log('Local microphone recognition and neural spoken replies are ready. Connect Google Calendar in House setup when ready.');
   });

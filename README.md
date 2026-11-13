@@ -33,6 +33,14 @@ Automatic launch and wake remain off by default. The user said the TV was not av
 
 A changed computer LAN address requires updating the receiver address and may require pairing the TV browser once at the new address. Refresh a previously open receiver page once to load the presence reporting update. Receiver or navigation failures appear in the TV launch page and tool activity, rather than becoming a spoken success claim. Protocol references: [SamsungTVWS browser launcher](https://github.com/xchwarze/samsung-tv-ws-api/blob/master/samsungtvws/remote.py) and [Home Assistant Samsung wake guidance](https://www.home-assistant.io/integrations/samsungtv/#turn-on-action).
 
+## Discord text and voice
+
+Open [Discord setup](http://127.0.0.1:3210/discord) on the central computer. Use your existing bot application and server; follow [DISCORD-SETUP.md](DISCORD-SETUP.md) to save its details locally, link Discord users to roommate profiles and approve voice channels. The bot token stays in ignored `private/discord.json` and is never returned by the setup API or included in GitHub source. Discord requires Node.js 22.12 or later; Node.js 24 is recommended.
+
+Use `/jarvis ask` for a private text reply. Join an approved voice channel and use `/jarvis join`, then say “Hey Jarvis” followed by your question. `/jarvis leave` disconnects voice, `/jarvis stop` stops your active request or reply, and `/jarvis last` privately retrieves your latest answer. Voice replies are audible to the channel. Requests use the linked user's assigned room, so that room's Jarvis screen can also display the result. Ordinary channel messages and unlinked speakers do not trigger requests.
+
+Discord carries messages and audio over the internet. Transcription, Ollama and speech generation run on the central computer, which must remain awake and online. An enabled bot reconnects on server startup; it never automatically joins a voice channel. Automated tests pass, but real Discord account and voice-channel verification require completing local setup. Receiving Discord voice uses a library feature whose stability Discord does not guarantee.
+
 ## Google Calendar preview
 
 The quiet calendar uses a wide seven-column weekly layout, an expanded day timeline, a highlight for today, and event start/end times. Its orange glass panel matches the Jarvis rings. On narrow screens the week becomes a scrollable two-column layout. The display only appears on request; the full dashboard does not open.
