@@ -180,7 +180,7 @@ test('direct conversation uses ordinary local chat with history instead of a sil
  let body;
  const decide=createDiscordTextModel({fetchImpl:async(url,options)=>{body=JSON.parse(options.body);return{ok:true,json:async()=>({message:{content:'Try chicken fried rice.'}})};}});
  const result=await decide({history:[{speaker:'cooper',text:'Any dinner ideas?'},{speaker:'Jarvis',text:'What ingredients do you have?'}],message:{speaker:'cooper',text:'Chicken and rice'},directed:true,signal:new AbortController().signal});
- assert.equal(result.respond,true);assert.equal(result.toolRequest,false);assert.equal(result.answer,'Try chicken fried rice.');assert.equal(body.format,undefined);assert.equal(body.messages.at(-1).content,'Chicken and rice');assert.equal(body.messages[2].role,'assistant');
+ assert.equal(result.respond,true);assert.equal(result.toolRequest,false);assert.equal(result.answer,'Try chicken fried rice.');assert.equal(body.format,undefined);assert.equal(body.messages.at(-1).content,'Chicken and rice');assert.equal(body.messages[2].role,'assistant');assert.equal(body.messages[1].content,'Any dinner ideas?');assert.match(body.messages[0].content,/select exactly one option already discussed/);assert.match(body.messages[0].content,/Do not repeat all options or ask the user to choose/);assert.equal(body.options.temperature,0.7);
 });
 
 test('Discord connection rejects missing channels, categories and missing reply permissions with useful errors',async()=>{
