@@ -1,3 +1,4 @@
+import { createDiscordTextModel } from './discord-text.mjs';
 import { createDiscordIntegration } from './discord-integration.mjs';
 import { createDiscordBridge } from './discord-bridge.mjs';
 import { createPhoneAccess } from './phone-access.mjs';
@@ -235,7 +236,7 @@ export function createJarvisServer({ model = process.env.JARVIS_MODEL || 'qwen3:
     try { caFingerprint = new X509Certificate(await readFile(`${phoneDirectory}/tls/ca.pem`)).fingerprint256; } catch {}
     return { ...await phonePairing.list(), enabled: Boolean(phoneAccess?.server.listening && phoneAccess?.bootstrap.listening), url: phoneAccess?.server.listening ? phoneAccess.url : null, setupUrl: phoneAccess?.bootstrap.listening ? phoneAccess.setupUrl : null, caFingerprint, error: phoneError, configured: Boolean(phoneBind) };
   }
-  const discord = createDiscordIntegration({ directory: actionsOptions.dataDirectory || `${APP_ROOT}/private`, profiles, rooms: ROOMS,
+  const discord = createDiscordIntegration({ directory: actionsOptions.dataDirectory || `${APP_ROOT}/private`, profiles, rooms: ROOMS, textDecide: createDiscordTextModel({model,ollamaUrl}),
     bridge: createDiscordBridge({ baseUrl: () => `http://127.0.0.1:${server.address().port}/` }), ...discordOptions });
   const toolContext = (room, profileId, question = '', view = 'minimal', signal) => ({ room, profileId: profileId || null, question, view, signal, timeZone: process.env.JARVIS_TIMEZONE || 'America/Chicago' });
 

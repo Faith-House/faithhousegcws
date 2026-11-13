@@ -1,3 +1,4 @@
+import {createDiscordText,createDiscordTextModel} from '../discord-text.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp,readFile,writeFile } from 'node:fs/promises';
@@ -34,8 +35,8 @@ test('Discord configuration persists credentials privately, redacts responses, v
 });
 
 function sdkFixture(){let client,registered;
- class Client extends EventEmitter{constructor(options){super();this.options=options;this.application={id:appId};this.user={tag:'Jarvis test'};this.guilds={fetch:async id=>{assert.equal(id,guildId);return{commands:{create:async command=>{registered=command;}}};}};}async login(){queueMicrotask(()=>this.emit('ready'));return token;}isReady(){return true;}destroy(){this.destroyed=true;}}
- const sdk={Client:class extends Client{constructor(options){super(options);client=this;}},GatewayIntentBits:{Guilds:1,GuildVoiceStates:128},Events:{ClientReady:'ready',InteractionCreate:'interaction',Error:'error',Invalidated:'invalidated'}};
+ class Client extends EventEmitter{constructor(options){super();this.options=options;this.application={id:appId};this.user={id:appId,tag:'Jarvis test'};this.guilds={fetch:async id=>{assert.equal(id,guildId);return{commands:{create:async command=>{registered=command;}}};}};}async login(){queueMicrotask(()=>this.emit('ready'));return token;}isReady(){return true;}destroy(){this.destroyed=true;}}
+ const sdk={Client:class extends Client{constructor(options){super(options);client=this;}},GatewayIntentBits:{Guilds:1,GuildVoiceStates:128,GuildMessages:512,MessageContent:32768},Events:{ClientReady:'ready',InteractionCreate:'interaction',MessageCreate:'messageCreate',Error:'error',Invalidated:'invalidated'}};
  return{sdk,getClient:()=>client,command:()=>registered};
 }
 function interaction(command,{who=userId,guild=guildId,question='What time is it?'}={}){const calls=[];return{calls,isChatInputCommand:()=>true,commandName:'jarvis',guildId:guild,user:{id:who},options:{getSubcommand:()=>command,getString:()=>question},reply:async data=>{calls.push({kind:'reply',data});},deferReply:async data=>{calls.push({kind:'defer',data});},editReply:async data=>{calls.push({kind:'edit',data});}};}
@@ -90,4 +91,94 @@ test('Discord bridge observes the real local request result and cannot cancel a 
   assert.equal((await fetch(base+'/discord')).status,200);assert.equal((await fetch(base+'/discord.js')).status,200);assert.equal((await fetch(base+'/api/discord')).status,200);
   const blocked=await fetch(base+'/api/discord',{method:'POST',headers:{'Content-Type':'application/json',Origin:'https://outside.example'},body:JSON.stringify(configuration)});assert.equal(blocked.status,403);
  }finally{bridge.close();await app.shutdown();}
+});
+
+
+let messageSequence=0;
+function chatMessage(content,options={}){
+ const replies=[];
+ return {id:String(++messageSequence),content,guildId,channelId,author:{id:userId,bot:false},mentions:{users:new Map()},reply:async payload=>{replies.push(payload);return{id:'reply-'+messageSequence};},replies,...options};
+}
+function textFixture(options={}){
+ const calls=[],asked=[];let time=1000000;
+ const service=createDiscordText({guildId,channelIds:[channelId],members,profiles,botId:appId,now:()=>time,
+  bridge:{ask:async(...args)=>{asked.push(args);return{answer:'Action confirmed.',room:'bedroom-1'};}},
+  decide:async request=>{calls.push(request);return{respond:true,toolRequest:false,answer:'Let’s talk.'};},...options});
+ return {service,calls,asked,tick:ms=>{time+=ms;}};
+}
+
+test('natural conversation is channel/user scoped, follows replies, and ignores bots, duplicates and banter',async()=>{
+ const {service,calls,asked}=textFixture();
+ const hello=chatMessage('Hey Jarvis, how are you?');await service.handle(hello);await service.handle(hello);
+ assert.equal(hello.replies.length,1);assert.equal(calls[0].directed,true);assert.deepEqual(hello.replies[0].allowedMentions.parse,[]);
+ const follow=chatMessage('What should we cook?');await service.handle(follow);assert.equal(calls[1].directed,true);assert.equal(calls[1].history.some(m=>m.speaker==='Jarvis'),true);
+ await service.handle(chatMessage('thanks'));await service.handle(chatMessage('Jarvis hello',{author:{id:userId,bot:true}}));
+ await service.handle(chatMessage('Jarvis hello',{channelId:'999999999999999999'}));
+ await service.handle(chatMessage('Jarvis hello',{author:{id:'999999999999999999'}}));
+ await service.handle(chatMessage('Jarvis hello',{guildId:'999999999999999999'}));
+ assert.equal(calls.length,2);assert.equal(asked.length,0);service.close();
+});
+
+test('AI can join useful open questions but ambient messages never execute tools and replies are throttled',async()=>{
+ let decisions=0,actions=0,time=1000000;
+ const service=createDiscordText({guildId,channelIds:[channelId],members,profiles,botId:appId,now:()=>time,
+  bridge:{ask:async()=>{actions++;}},decide:async()=>{decisions++;return{respond:true,toolRequest:true,answer:'I can explain that.'};}});
+ await service.handle(chatMessage('lol that was wild'));assert.equal(decisions,0);
+ const question=chatMessage('Does anyone know how rainbows form?');await service.handle(question);assert.equal(question.replies.length,1);assert.equal(actions,0);
+ // Another linked speaker gets no implicit engagement and cannot bypass the ambient cooldown.
+ time+=100000;const mentionOthers=chatMessage('Can you help me?',{mentions:{users:new Map([['777777777777777777',{id:'777777777777777777'}]])}});
+ await service.handle(mentionOthers);assert.equal(mentionOthers.replies.length,0);assert.equal(decisions,1);
+ service.close();
+});
+
+test('natural household requests reuse real tool bridge only when addressed to Jarvis',async()=>{
+ const {service,asked}=textFixture();
+ const command=chatMessage('Hey Jarvis, add take out the trash to the chore list');await service.handle(command);
+ assert.equal(asked.length,1);assert.equal(asked[0][0],userId);assert.equal(asked[0][1].profileId,'cooper');assert.match(asked[0][2],/^add take/);assert.equal(command.replies[0].content,'Action confirmed.');
+ service.close();
+});
+
+test('pending channel replies are aborted on disconnect and history expires',async()=>{
+ let release,started;const began=new Promise(r=>started=r);
+ const fixture=textFixture({decide:async request=>{started();await new Promise(r=>release=r);assert.equal(request.signal.aborted,true);return{respond:true,toolRequest:false,answer:'Too late'};}});
+ const message=chatMessage('Jarvis hello');const pending=fixture.service.handle(message);await began;fixture.service.close();release();await pending;assert.equal(message.replies.length,0);
+ const normal=textFixture();await normal.service.handle(chatMessage('Jarvis hello'));normal.tick(301000);
+ const later=chatMessage('What should we eat?');await normal.service.handle(later);assert.equal(normal.calls[1].directed,false);assert.deepEqual(normal.calls[1].history,[]);normal.service.close();
+});
+
+test('old Discord configuration migrates without enabling channel reading; opted-in channels request the required intents',async()=>{
+ const directory=await dir();await writeFile(path.join(directory,'discord.json'),JSON.stringify({format:1,enabled:false,...configuration}));
+ const store=createDiscordConfig({directory,profiles,rooms:roomIds});assert.deepEqual((await store.status()).textChannelIds,[]);
+ await store.configure({...configuration,textChannelIds:[channelId]});await store.configure({...configuration,token:''});assert.deepEqual((await store.status()).textChannelIds,[channelId]);
+ await assert.rejects(store.configure({...configuration,textChannelIds:['invalid']}),/text channels/);await store.close();
+ const fixture=sdkFixture(),service=createDiscordIntegration({directory:await dir(),profiles,rooms:roomIds,bridge:{close(){}},loadSdk:async()=>fixture.sdk,voiceFactory:async()=>({close:async()=>{}})});
+ await service.configure({...configuration,textChannelIds:[channelId]});await service.connect();assert.deepEqual(fixture.getClient().options.intents,[1,128,512,32768]);await service.close();
+});
+
+test('channel model uses bounded local structured output and never grants tools to an ambient decision',async()=>{
+ let body;
+ const decide=createDiscordTextModel({fetchImpl:async(url,options)=>{assert.equal(url.hostname,'127.0.0.1');body=JSON.parse(options.body);return{ok:true,json:async()=>({message:{content:JSON.stringify({respond:true,toolRequest:true,answer:'Hello'})}})};}});
+ const result=await decide({history:[],message:{text:'Question?'},directed:false,signal:new AbortController().signal});
+ assert.equal(result.toolRequest,false);assert.equal(body.stream,false);assert.equal(body.format.type,'object');assert.equal(body.options.num_ctx,4096);
+});
+
+test('ambient cooldown limits unsolicited replies while direct requests bypass it',async()=>{
+ let time=1000000,count=0;const secondUser='777777777777777777';
+ const service=createDiscordText({guildId,channelIds:[channelId],members:[...members,{...members[0],userId:secondUser}],profiles,botId:appId,now:()=>time,bridge:{},decide:async()=>{count++;return{respond:true,toolRequest:false,answer:'Useful answer'};}});
+ await service.handle(chatMessage('Why is the sky blue?'));assert.equal(count,1);
+ time+=11000;const ambient=chatMessage('Why are sunsets red?',{author:{id:secondUser}});await service.handle(ambient);assert.equal(count,1);assert.equal(ambient.replies.length,0);
+ const directed=chatMessage('Jarvis, why are sunsets red?',{author:{id:secondUser}});await service.handle(directed);assert.equal(count,2);assert.equal(directed.replies.length,1);service.close();
+});
+
+test('channel context does not leak into another approved channel',async()=>{
+ const secondChannel='888888888888888888',fixture=textFixture({channelIds:[channelId,secondChannel]});
+ await fixture.service.handle(chatMessage('Jarvis, we are discussing chicken'));await fixture.service.handle(chatMessage('Jarvis, hello',{channelId:secondChannel}));
+ assert.deepEqual(fixture.calls[1].history,[]);fixture.service.close();
+});
+
+test('direct conversation uses ordinary local chat with history instead of a silence classifier',async()=>{
+ let body;
+ const decide=createDiscordTextModel({fetchImpl:async(url,options)=>{body=JSON.parse(options.body);return{ok:true,json:async()=>({message:{content:'Try chicken fried rice.'}})};}});
+ const result=await decide({history:[{speaker:'cooper',text:'Any dinner ideas?'},{speaker:'Jarvis',text:'What ingredients do you have?'}],message:{speaker:'cooper',text:'Chicken and rice'},directed:true,signal:new AbortController().signal});
+ assert.equal(result.respond,true);assert.equal(result.toolRequest,false);assert.equal(result.answer,'Try chicken fried rice.');assert.equal(body.format,undefined);assert.equal(body.messages.at(-1).content,'Chicken and rice');assert.equal(body.messages[2].role,'assistant');
 });
