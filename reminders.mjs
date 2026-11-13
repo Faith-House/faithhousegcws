@@ -124,7 +124,7 @@ export function createReminders({ rooms, directory = path.join(APP_ROOT, 'privat
     try {
       const title = after ? after[1] : before[2], schedule = after ? after[2] : before[1];
       const item = await add({ room, title, dueAt: parseSchedule(schedule, now(), timeZone) });
-      return { kind: 'reminder', answer: 'I’ll remind this room to ' + item.title + ' on ' + describe(item) + '. Keep Jarvis running for the alert.', reminder: item };
+      return { kind: 'reminder', answer: 'I’ll remind this room to ' + item.title + ' on ' + describe(item) + '. Keep Jarvis running for the alert.', reminder: item, undo: () => remove(room, [item.id]) };
     } catch (error) { return { kind: 'reminder', needsInterpretation: error.status === 400, answer: error.status ? error.message : 'I could not save the reminder. It has not been set.' }; }
   }
   async function close() { closed = true; clearInterval(interval); await initialized; await chain; }

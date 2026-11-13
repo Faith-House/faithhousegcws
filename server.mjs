@@ -1,7 +1,12 @@
+import { createPhoneAccess } from './phone-access.mjs';
+import { createTvAutolaunch } from './tv-autolaunch.mjs';
+import { createSamsungLauncher } from './samsung-launcher.mjs';
+import { createModelRouter, modelModeIntent, codingPrompt, codingMessages } from './model-routing.mjs';
+import { createConversation, createUndoHistory, isUndoRequest, dateForRequest } from './conversation.mjs';
 import http from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { randomUUID, createHash } from 'node:crypto';
+import { randomUUID, createHash, X509Certificate } from 'node:crypto';
 import { createLocalSpeech } from './speech.mjs';
 import { createLocalRecognition, decodeMicrophoneWave, MAX_AUDIO_BYTES } from './recognition.mjs';
 import { createLocalActions } from './local-actions.mjs';
@@ -32,6 +37,12 @@ import { createWebSearch, isSearchRequest } from './web-search.mjs';
 export const ROOMS = ['bedroom-1', 'bedroom-2', 'bedroom-3', 'bedroom-4', 'living-room'];
 const publicRoot = new URL('./public/', import.meta.url);
 const assets = new Map([
+  ['/phones', ['phones.html', 'text/html; charset=utf-8']],
+  ['/phones.js', ['phones.js', 'text/javascript; charset=utf-8']],
+  ['/tv-launch', ['tv-launch.html', 'text/html; charset=utf-8']],
+  ['/tv-launch.js', ['tv-launch.js', 'text/javascript; charset=utf-8']],
+  ['/models', ['models.html', 'text/html; charset=utf-8']],
+  ['/models.js', ['models.js', 'text/javascript; charset=utf-8']],
   ['/', ['dashboard.html', 'text/html; charset=utf-8']],
   ['/dashboard', ['dashboard.html', 'text/html; charset=utf-8']],
   ['/dashboard.js', ['dashboard.js', 'text/javascript; charset=utf-8']],
@@ -81,7 +92,7 @@ function json(response, status, body) {
   response.end(JSON.stringify(body));
 }
 
-async function readJson(request) {
+async function readJson(request, maxBytes = 16384) {
   if (!request.headers['content-type']?.startsWith('application/json')) {
     throw Object.assign(new Error('Please send a JSON request.'), { status: 415 });
   }
@@ -89,7 +100,7 @@ async function readJson(request) {
   let length = 0;
   for await (const chunk of request) {
     length += chunk.length;
-    if (length > 16384) throw Object.assign(new Error('That request is too large.'), { status: 413 });
+    if (length > maxBytes) throw Object.assign(new Error('That request is too large.'), { status: 413 });
     chunks.push(chunk);
   }
   try { return JSON.parse(Buffer.concat(chunks).toString('utf8')); }
@@ -130,9 +141,10 @@ function unavailableConnection(question) {
   return null;
 }
 
-export function createJarvisServer({ model = process.env.JARVIS_MODEL || 'qwen3:0.6b', ollamaUrl = process.env.JARVIS_OLLAMA_URL || 'http://127.0.0.1:11434', requestTimeoutMs = 60000, speech = createLocalSpeech(), recognition = createLocalRecognition(), actionsOptions = {}, homeAssistant = createHomeAssistant(), displayBind = process.env.JARVIS_DISPLAY_BIND || '', pairingOptions = {}, wakeword = createWakeWordService(), profiles = createProfiles({ directory: actionsOptions.dataDirectory }), speakerId = createSpeakerIdentification(), webSearch = createWebSearch({ model, ollamaUrl }), diagnosticsOptions = {}, weatherOptions = {} } = {}) {
+export function createJarvisServer({ model = process.env.JARVIS_MODEL || 'qwen3:0.6b', ollamaUrl = process.env.JARVIS_OLLAMA_URL || 'http://127.0.0.1:11434', requestTimeoutMs = 60000, speech = createLocalSpeech(), recognition = createLocalRecognition(), actionsOptions = {}, homeAssistant = createHomeAssistant(), displayBind = process.env.JARVIS_DISPLAY_BIND || '', pairingOptions = {}, wakeword = createWakeWordService(), profiles = createProfiles({ directory: actionsOptions.dataDirectory }), speakerId = createSpeakerIdentification(), webSearch = createWebSearch({ model, ollamaUrl }), diagnosticsOptions = {}, weatherOptions = {}, codingModel = process.env.JARVIS_CODING_MODEL || '', codingContext = process.env.JARVIS_CODING_CONTEXT || 8192, codingOutput = process.env.JARVIS_CODING_OUTPUT || 2048, codingTimeoutMs = 180000, tvLaunchOptions = {}, phoneBind = process.env.JARVIS_PHONE_BIND || '', phonePort = Number(process.env.JARVIS_PHONE_PORT || 3215), phoneSetupPort = Number(process.env.JARVIS_PHONE_SETUP_PORT || 3214) } = {}) {
   const state = new Map(ROOMS.map(room => [room, initialState()]));
-  const history = new Map(ROOMS.map(room => [room, []]));
+  const conversation = createConversation();
+  const undoHistory = createUndoHistory();
   const clients = new Map(ROOMS.map(room => [room, new Set()]));
   const expiryTimers = new Map();
   const speechCache = new Map();
@@ -140,7 +152,6 @@ export function createJarvisServer({ model = process.env.JARVIS_MODEL || 'qwen3:
   let active = null;
   let recognitionActive = null;
   void profiles.initialize().catch(() => {});
-  const historyKey = (room, profileId) => `${room}:${profileId || 'shared'}`;
   const speakerTurns = createSpeakerTurns();
   const systemHealth = createSystemHealth();
   const calendar = createGoogleCalendar({ dataDirectory: actionsOptions.dataDirectory || `${APP_ROOT}/private` });
@@ -177,10 +188,48 @@ export function createJarvisServer({ model = process.env.JARVIS_MODEL || 'qwen3:
   if (!['127.0.0.1', 'localhost', '[::1]'].includes(base.hostname) || base.protocol !== 'http:') {
     throw new Error('This prototype expects Ollama on this computer at an http://localhost address.');
   }
+  const modelRouter = createModelRouter({ directory: actionsOptions.dataDirectory || `${APP_ROOT}/private`, base, fastModel: model, codingModel, codingContext, codingOutput });
+  void modelRouter.initialize();
   const commandInterpreter = createCommandInterpreter({ model, base });
   const diagnostics = createDiagnostics({ ...diagnosticsOptions, checks: diagnosticsOptions.checks || connectionChecks({ checkModel, speech, recognition, wakeword, speakerId, homeAssistant, calendar, pairing, webSearch, weather, network: actions.network, displayStatus: () => ({ enabled: Boolean(displayServer?.server.listening), connectedIds: displayServer?.connectedIds() || [] }) }) });
   const activity = createToolActivity();
-  const toolAgent = createToolAgent({ onActivity: activity.event, model: process.env.JARVIS_TOOL_MODEL || model, base, tools: createHouseTools({ actions, reminders, calendar, homeAssistant, systemHealth, webSearch, diagnostics, chores, weather, draftCalendarEvent: (room, event) => calendarDrafts.set(room, { ...event, expiresAt: Date.now() + 120000 }) }) });
+  const toolAgent = createToolAgent({ onActivity: activity.event, onResult: undoHistory.record, model: process.env.JARVIS_TOOL_MODEL || model, base, tools: createHouseTools({ actions, reminders, calendar, homeAssistant, systemHealth, webSearch, diagnostics, chores, weather, draftCalendarEvent: (room, event) => calendarDrafts.set(room, { ...event, expiresAt: Date.now() + 120000 }) }) });
+  const tvLaunch = createTvAutolaunch({ directory: actionsOptions.dataDirectory || `${APP_ROOT}/private`, pairing,
+    receiver: () => ({ enabled: Boolean(displayServer?.server.listening), url: displayServer?.server.listening ? `http://${displayBind}:${displayServer.server.address().port}/` : null }),
+    visible: id => displayServer?.isVisible(id) || false,
+    remote: createSamsungLauncher({ directory: actionsOptions.dataDirectory || `${APP_ROOT}/private` }), ...tvLaunchOptions });
+  async function bringUpTv(room, requestId, signal) {
+    const info = await tvLaunch.status();
+    if (!info.enabled || info.target?.room !== room) return;
+    const result = await activity.track({ room }, 'show_tv', () => tvLaunch.ensure(room, { signal }), result => result.ok ? 'completed' : result.state === 'unconfirmed' ? 'waiting' : 'failed');
+    if (state.get(room).requestId !== requestId) return;
+    update(room, { tvLaunch: result });
+    if (result.ok && ['ready', 'error'].includes(state.get(room).state)) scheduleExpiry(room, requestId, 30000);
+  }
+  let phoneAccess, phoneStarting, phoneError = '', phoneClosed = false;
+  const phoneDirectory = `${actionsOptions.dataDirectory || `${APP_ROOT}/private`}/phone-access`;
+  const phonePairing = createDisplayPairing({ rooms: ROOMS, directory: phoneDirectory, includeProfile: true, onRevoke: id => phoneAccess?.revoke(id) });
+  async function startPhoneAccess() {
+    if (phoneStarting) return phoneStarting;
+    if (!phoneBind || phoneClosed) return;
+    phoneStarting = (async () => {
+      try {
+        await modelRouter.initialize();
+        phoneAccess = await createPhoneAccess({ directory: actionsOptions.dataDirectory || `${APP_ROOT}/private`, bindAddress: phoneBind, port: phonePort, setupPort: phoneSetupPort, pairing: phonePairing,
+          centralUrl: () => `http://127.0.0.1:${server.address().port}/`, snapshot: room => state.get(room), profiles, modelRoute: context => modelRouter.route(context),
+          subscribe: (room, response) => { clients.get(room).add(response); return () => clients.get(room).delete(response); } });
+        if (phoneClosed) { await phoneAccess.close(); return; }
+        await new Promise((resolve,reject) => { phoneAccess.server.once('error',reject); phoneAccess.server.listen(phonePort,phoneBind,resolve); });
+        await new Promise((resolve,reject) => { phoneAccess.bootstrap.once('error',reject); phoneAccess.bootstrap.listen(phoneSetupPort,phoneBind,resolve); });
+      } catch { phoneError = 'Phone access could not start. Run SETUP-PHONE.cmd and check the configured local address and ports.'; await phoneAccess?.close(); }
+    })();
+    return phoneStarting;
+  }
+  async function phoneStatus() {
+    let caFingerprint = null;
+    try { caFingerprint = new X509Certificate(await readFile(`${phoneDirectory}/tls/ca.pem`)).fingerprint256; } catch {}
+    return { ...await phonePairing.list(), enabled: Boolean(phoneAccess?.server.listening && phoneAccess?.bootstrap.listening), url: phoneAccess?.server.listening ? phoneAccess.url : null, setupUrl: phoneAccess?.bootstrap.listening ? phoneAccess.setupUrl : null, caFingerprint, error: phoneError, configured: Boolean(phoneBind) };
+  }
   const toolContext = (room, profileId, question = '', view = 'minimal', signal) => ({ room, profileId: profileId || null, question, view, signal, timeZone: process.env.JARVIS_TIMEZONE || 'America/Chicago' });
 
   let modelCheck, modelCache;
@@ -251,6 +300,7 @@ export function createJarvisServer({ model = process.env.JARVIS_MODEL || 'qwen3:
   function scheduleExpiry(room, requestId, delay) {
     clearTimeout(expiryTimers.get(room));
     const expiry = setTimeout(() => {
+      if (state.get(room).requestId === requestId && tvLaunch.pending(room)) { scheduleExpiry(room, requestId, 1000); return; }
       if (state.get(room).requestId === requestId) { invalidateSpeech(room); state.set(room, { ...initialState(state.get(room).view, state.get(room).calendarPreview, state.get(room).calendarDraft), notification: state.get(room).notification }); publish(room); }
     }, delay);
     expiry.unref();
@@ -278,91 +328,134 @@ export function createJarvisServer({ model = process.env.JARVIS_MODEL || 'qwen3:
       active.controller.abort(new Error('cancelled'));
       active = null;
     }
-    if (resetHistory) history.set(historyKey(room, profileId), []);
+    if (resetHistory) { conversation.clear(toolContext(room, profileId)); undoHistory.clear(toolContext(room, profileId)); modelRouter.clear(toolContext(room, profileId)); }
     state.set(room, { ...initialState(state.get(room).view, preservePending ? state.get(room).calendarPreview : null, preservePending ? state.get(room).calendarDraft : null), notification: state.get(room).notification });
     publish(room);
   }
 
   async function generate(room, question, requestId, controller, profile, speaker, viewContext) {
-    const timer = setTimeout(() => controller.abort(new Error('timeout')), requestTimeoutMs);
+    await modelRouter.initialize();
+    let route = modelRouter.route({ room, profileId: profile?.id });
+    const timer = setTimeout(() => controller.abort(new Error('timeout')), route.mode === 'coding' ? codingTimeoutMs : requestTimeoutMs);
     timer.unref();
     const stillCurrent = () => state.get(room).requestId === requestId;
     const activityContext = { room, requestId, signal: controller.signal };
-    const tracked = (tool, task, classify) => activity.track(activityContext, tool, task, classify);
+    const originalQuestion = question;
+    const scope = { room, profileId: profile?.id || null, question, requestId, signal: controller.signal, mode: route.mode };
+    const turn = conversation.prepare(scope);
+    question = turn.question;
+    const context = { ...toolContext(room, profile?.id, question, viewContext || state.get(room).view, controller.signal), requestId, messages: turn.messages };
+    const tracked = (tool, task, classify) => activity.track(activityContext, tool, async () => {
+      const result = await task();
+      if (result && result.ok !== false) undoHistory.record(scope, { ...result, undoUnsupported: result.ok === true && ['cancel_timer', 'cancel_reminder', 'control_device', 'add_calendar_event'].includes(tool) });
+      return result;
+    }, classify);
+    const respond = patch => {
+      if (patch.state === 'ready' && stillCurrent()) {
+        const before = state.get(room);
+        const keys = ['view', 'calendarPreview'].filter(key => Object.hasOwn(patch, key) && before[key] !== patch[key]);
+        if (keys.length && !isUndoRequest(originalQuestion)) {
+          const saved = Object.fromEntries(keys.map(key => [key, before[key]]));
+          const expected = Object.fromEntries(keys.map(key => [key, patch[key]]));
+          undoHistory.record(scope, { undo: async () => {
+            if (keys.some(key => state.get(room)[key] !== expected[key])) throw Object.assign(new Error('The screen has changed since that request. I left the current view in place.'), { status: 409 });
+            // Apply immediately so another inverse in the same request sees it.
+            state.set(room, { ...state.get(room), ...saved });
+            return { patch: saved };
+          } });
+        }
+        conversation.remember(scope, { question, answer: patch.answer, kind: patch.resultKind, place: patch.weatherPreview?.location?.label || null });
+      }
+      update(room, { ...patch, modelMode: route.mode, modelName: route.model, maxInputChars: route.maxInputChars });
+    };
+    const acceptTools = result => {
+      if (!result.handled || !stillCurrent()) return false;
+      respond({ state: 'ready', answer: result.answer, ...(result.patch || {}), resultKind: result.clarification ? 'clarification' : result.patch?.view ? 'view' : 'tool-agent', toolActivity: result.activity || [] }); return true;
+    };
+    const compound = isCompoundToolRequest(question);
+    const useAgentFirst = compound || toolAgent.hasPending(context);
     try {
+      void bringUpTv(room, requestId, controller.signal).catch(() => {});
+      const modeIntent = modelModeIntent(originalQuestion);
+      if (modeIntent) {
+        const result = await tracked('set_model_mode', () => modelRouter.switchMode(scope, modeIntent));
+        route = result.route; toolAgent.clear(context);
+        if (stillCurrent()) respond({ state: 'ready', answer: result.summary, resultKind: 'model-mode' });
+        return;
+      }
+      const householdCommand = isUndoRequest(question) || (!/[`{}]/.test(question) && question.length <= 600 && (isWeatherRequest(question) || /^(?:(?:hey )?jarvis[, ]*)?(?:please )?(?:(?:can|could|would) you )?(?:show|open|close|hide|switch|go|set|start|stop|cancel|remind|list|mark|assign|add|turn|check)\b.*\b(?:dashboard|quiet|rings|timer|countdown|reminder|calendar|chores?|lights?|lamps?|network|connections)\b/i.test(question)));
+      if (route.mode !== 'coding' || householdCommand) {
+      if (isUndoRequest(originalQuestion)) {
+        toolAgent.clear(context);
+        const result = await tracked('undo_action', () => undoHistory.undo(scope));
+        if (stillCurrent()) respond({ state: 'ready', answer: result.summary, ...(result.patch || {}), resultKind: 'undo' });
+        return;
+      }
+      if (useAgentFirst) {
+        if (acceptTools(await toolAgent.run(context))) return;
+        if (compound) { respond({ state: 'ready', answer: 'I could not confidently plan every step. Please split that request into individual tasks.', resultKind: 'clarification' }); return; }
+      }
       const household = await profiles.list();
       const identityReply = profileReply({ question, profile, speaker, household, modelAvailable: speakerId.status().available });
       if (!stillCurrent()) return;
-      if (identityReply) { update(room, { state: 'ready', answer: identityReply }); return; }
+      if (identityReply) { respond({ state: 'ready', answer: identityReply }); return; }
       if (/\b(?:diagnos(?:e|is|tics)|troubleshoot|check (?:all |my |the )?connections|connection (?:health|check))\b/i.test(question) && !/\b(?:don't|do not|never)\b/i.test(question)) {
         const report = await tracked('diagnose_connections', () => diagnostics.run());
         if (!stillCurrent()) return;
-        update(room, { state: 'ready', answer: report.summary + ' Open Connection diagnostics for the detailed checks and browser audio tests.', resultKind: 'diagnostics' }); return;
+        respond({ state: 'ready', answer: report.summary + ' Open Connection diagnostics for the detailed checks and browser audio tests.', resultKind: 'diagnostics' }); return;
       }
-      if (/\b(?:show|open|view|pull up)\b.*\btool activity\b/i.test(question)) { update(room, { state: 'ready', answer: 'Here is the tool activity view. Open it to see running actions and their outcomes.', resultKind: 'activity' }); return; }
+      if (/\b(?:show|open|view|pull up)\b.*\btool activity\b/i.test(question)) { respond({ state: 'ready', answer: 'Here is the tool activity view. Open it to see running actions and their outcomes.', resultKind: 'activity' }); return; }
       if (/\bchores?\b/i.test(question) && !/\b(?:don't|do not|never|not done|haven't|didn't)\b/i.test(question)) {
         const direct = await tracked(/\b(?:add|create)\b/i.test(question) ? 'add_chore' : /\b(?:mark|complete|finish)\b/i.test(question) ? 'set_chore_status' : 'list_chores', () => chores.handle(question, profile?.id), r => !r ? 'ignored' : r.needsInterpretation ? 'waiting' : r.ok === false ? 'failed' : 'completed');
-        if (direct) {
-          update(room, { state: 'ready', answer: direct.summary, resultKind: 'chores' }); return;
+        if (direct && !direct.needsInterpretation) {
+          respond({ state: 'ready', answer: direct.summary, resultKind: 'chores' }); return;
         }
       }
-      if (/\b(?:close|hide|dismiss)\b.*\bweather\b/i.test(question)) { update(room, { state: 'ready', answer: 'Weather preview closed.', weatherPreview: null, resultKind: 'weather' }); return; }
+      if (/\b(?:close|hide|dismiss)\b.*\bweather\b/i.test(question)) { respond({ state: 'ready', answer: 'Weather preview closed.', weatherPreview: null, resultKind: 'weather' }); return; }
       if (isWeatherRequest(question)) {
         const result = await tracked('get_weather', () => weather.answer(question, { signal: controller.signal }));
         if (!stillCurrent()) return;
-        update(room, { state: 'ready', answer: result.summary, ...(result.patch || {}), resultKind: 'weather' }); return;
+        respond({ state: 'ready', answer: result.summary, ...(result.patch || {}), resultKind: 'weather' }); return;
       }
       if (isSearchRequest(question)) {
-        update(room, { state: 'thinking', resultKind: 'web-search', calendarPreview: null });
+        respond({ state: 'thinking', resultKind: 'web-search', calendarPreview: null });
         const result = await tracked('search_web', () => webSearch.answer(question, { signal: controller.signal }));
         if (!stillCurrent()) return;
         controller.signal.throwIfAborted();
-        update(room, { state: 'ready', answer: result.summary, ...(result.patch || {}), resultKind: 'web-search', toolActivity: [{ tool: 'search_web', status: result.ok ? 'completed' : 'failed' }] }); return;
+        respond({ state: 'ready', answer: result.summary, ...(result.patch || {}), resultKind: 'web-search', toolActivity: [{ tool: 'search_web', status: result.ok ? 'completed' : 'failed' }] }); return;
       }
       if (/\b(?:what (?:tools|actions) (?:can|do) you|what can you (?:do|control)|(?:your|available) capabilities)\b/i.test(question)) {
         const home = await homeAssistant.status();
-        update(room, { state: 'ready', resultKind: 'tool-agent', answer: 'I can switch screen views, run room timers and reminders, manage shared household chores, read current weather and forecasts, show calendar previews, and check this computer and its network. I can search the internet for public information with source links, combine tasks, and ask for missing details. ' + (home.configured && home.exposedDevices.length ? 'I can also control the approved shared Home Assistant devices.' : 'Shared device controls need Home Assistant connected first.') }); return;
+        respond({ state: 'ready', resultKind: 'tool-agent', answer: 'I can switch screen views, run room timers and reminders, manage shared household chores, read current weather and forecasts, show calendar previews, and check this computer and its network. I can search the internet for public information with source links, combine tasks, and ask for missing details. ' + (home.configured && home.exposedDevices.length ? 'I can also control the approved shared Home Assistant devices.' : 'Shared device controls need Home Assistant connected first.') }); return;
       }
-      const context = { ...toolContext(room, profile?.id, question, viewContext || state.get(room).view, controller.signal), requestId };
-      const compound = isCompoundToolRequest(question);
-      const useAgentFirst = compound || toolAgent.hasPending(context);
       const directView = !useAgentFirst && directViewIntent(question, context.view);
       if (directView) {
         await tracked('set_view', async () => ({ ok: true }));
-        update(room, { state: 'ready', view: directView.action === 'show_dashboard' ? 'dashboard' : 'minimal', answer: directView.action === 'show_dashboard' ? 'Here’s the dashboard.' : 'Back to Jarvis.', resultKind: 'view' }); return;
-      }
-      const acceptTools = result => {
-        if (!result.handled || !stillCurrent()) return false;
-        update(room, { state: 'ready', answer: result.answer, ...(result.patch || {}), resultKind: result.patch?.view ? 'view' : result.clarification ? 'clarification' : 'tool-agent', toolActivity: result.activity || [] }); return true;
-      };
-      if (useAgentFirst) {
-        const result = await toolAgent.run(context);
-        if (acceptTools(result)) return;
-        if (compound) { update(room, { state: 'ready', answer: 'I could not confidently plan every step, so I have not started them. Could you split that request into individual tasks?', resultKind: 'clarification' }); return; }
+        respond({ state: 'ready', view: directView.action === 'show_dashboard' ? 'dashboard' : 'minimal', answer: directView.action === 'show_dashboard' ? 'Here’s the dashboard.' : 'Back to Jarvis.', resultKind: 'view' }); return;
       }
       if (/\b(?:demo|sample|example)\b/i.test(question) && /\b(?:calendar|schedule)\b/i.test(question) && !/\b(?:don't|do not|never|add|create|delete)\b/i.test(question)) {
         await tracked('preview_calendar_demo', async () => ({ ok: true }));
         const range = /\bweek(?:ly)?\b/i.test(question) ? 'week' : 'day';
         calendarDrafts.delete(room);
-        update(room, { state: 'ready', view: 'minimal', answer: 'Here is a sample calendar. These are fictional events.', resultKind: 'calendar-demo', calendarDraft: null, calendarPreview: createCalendarDemo({ range, timeZone: process.env.JARVIS_TIMEZONE || 'America/Chicago' }) }); return;
+        respond({ state: 'ready', view: 'minimal', answer: 'Here is a sample calendar. These are fictional events.', resultKind: 'calendar-demo', calendarDraft: null, calendarPreview: createCalendarDemo({ range, date: dateForRequest(question, { timeZone: context.timeZone }), timeZone: process.env.JARVIS_TIMEZONE || 'America/Chicago' }) }); return;
       }
       const pendingCalendar = calendarDrafts.get(room);
       const reply = question.toLowerCase().trim().replace(/[?.!]+$/, '');
       if (pendingCalendar && pendingCalendar.expiresAt <= Date.now()) {
-        calendarDrafts.delete(room); update(room, { state: 'ready', answer: 'That event confirmation expired. Please ask me to add it again.', resultKind: 'calendar-event', calendarDraft: null }); return;
+        calendarDrafts.delete(room); respond({ state: 'ready', answer: 'That event confirmation expired. Please ask me to add it again.', resultKind: 'calendar-event', calendarDraft: null }); return;
       }
       if (pendingCalendar && /^(?:yes|confirm|confirm it|add it|yes add it|go ahead|do it|that's right)$/.test(reply)) {
         try {
           const event = await tracked('add_calendar_event', () => calendar.addEvent({ ...pendingCalendar, timeZone: process.env.JARVIS_TIMEZONE || 'America/Chicago' }));
           calendarDrafts.delete(room);
-          update(room, { state: 'ready', answer: 'Added ' + event.title + ' to your Google Calendar.', resultKind: 'calendar-event', calendarPreview: null, calendarDraft: null }); return;
+          respond({ state: 'ready', answer: 'Added ' + event.title + ' to your Google Calendar.', resultKind: 'calendar-event', calendarPreview: null, calendarDraft: null }); return;
         } catch (error) {
           calendarDrafts.delete(room);
-          update(room, { state: 'ready', answer: error.status === 401 ? error.message : 'I could not add the event. It was not confirmed as saved.', resultKind: 'calendar-event', calendarDraft: null }); return;
+          respond({ state: 'ready', answer: error.status === 401 ? error.message : 'I could not add the event. It was not confirmed as saved.', resultKind: 'calendar-event', calendarDraft: null }); return;
         }
       }
       if (pendingCalendar && /^(?:no|cancel|never mind|forget it|don't add it)$/.test(reply)) {
-        calendarDrafts.delete(room); update(room, { state: 'ready', answer: 'Okay, I did not add the event.', resultKind: 'calendar-event', calendarDraft: null }); return;
+        calendarDrafts.delete(room); respond({ state: 'ready', answer: 'Okay, I did not add the event.', resultKind: 'calendar-event', calendarDraft: null }); return;
       }
       const runLocal = async () => await reminders.handle({ room, question }) || await actions.handle({ room, question });
       const directTool = directToolName(question);
@@ -385,62 +478,64 @@ export function createJarvisServer({ model = process.env.JARVIS_MODEL || 'qwen3:
         controller.signal.throwIfAborted();
         if (intent.type === 'local') local = await tracked(directToolName(intent.question) || 'local_action', () => actions.handle({ room, question: intent.question }), r => !r ? 'ignored' : r.needsInterpretation ? 'waiting' : r.ok === false ? 'failed' : 'completed');
         else if (intent.type === 'device') device = await tracked('control_device', () => homeAssistant.handle({ room, question: intent.question, signal: controller.signal }), r => r?.ok === true ? 'completed' : 'failed');
-        else if (intent.type === 'disconnected') { update(room, { state: 'ready', answer: "The home controls aren't connected yet. Home Assistant and an approved device list are needed first.", resultKind: 'device' }); return; }
+        else if (intent.type === 'disconnected') { respond({ state: 'ready', answer: "The home controls aren't connected yet. Home Assistant and an approved device list are needed first.", resultKind: 'device' }); return; }
         else if (intent.type === 'calendar-preview') local = { answer: intent.range === 'week' ? 'Here’s your calendar for this week.' : 'Here’s your calendar for today.', kind: 'calendar-preview', range: intent.range };
-        else if (intent.type === 'calendar-clear') { await tracked('hide_calendar', async () => ({ ok: true })); update(room, { state: 'ready', answer: 'Calendar preview closed.', resultKind: 'calendar-preview', calendarPreview: null, calendarDraft: null }); calendarDrafts.delete(room); return; }
+        else if (intent.type === 'calendar-clear') { await tracked('hide_calendar', async () => ({ ok: true })); respond({ state: 'ready', answer: 'Calendar preview closed.', resultKind: 'calendar-preview', calendarPreview: null, calendarDraft: null }); calendarDrafts.delete(room); return; }
         else if (intent.type === 'calendar-add') {
-          if (!(await calendar.status()).connected) { await tracked('draft_calendar_event', async () => ({ ok: false })); update(room, { state: 'ready', answer: 'Google Calendar is not connected yet. Open House setup to connect it.', resultKind: 'calendar-event' }); return; }
+          if (!(await calendar.status()).connected) { await tracked('draft_calendar_event', async () => ({ ok: false })); respond({ state: 'ready', answer: 'Google Calendar is not connected yet. Open House setup to connect it.', resultKind: 'calendar-event' }); return; }
           calendarDrafts.set(room, { title: intent.title, start: intent.start, end: intent.end, expiresAt: Date.now() + 120000 });
           const zone = process.env.JARVIS_TIMEZONE || 'America/Chicago';
           const start = new Intl.DateTimeFormat('en-US', { timeZone: zone, weekday: 'long', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(new Date(intent.start));
           const end = new Intl.DateTimeFormat('en-US', { timeZone: zone, hour: 'numeric', minute: '2-digit' }).format(new Date(intent.end));
-          update(room, { state: 'ready', answer: 'Add “' + intent.title + '” on ' + start + ' to ' + end + '? Say “confirm” to add it, or “cancel” to discard.', resultKind: 'calendar-confirmation', calendarDraft: intent }); return;
+          respond({ state: 'ready', answer: 'Add “' + intent.title + '” on ' + start + ' to ' + end + '? Say “confirm” to add it, or “cancel” to discard.', resultKind: 'calendar-confirmation', calendarDraft: intent }); return;
         }
         else if (intent.type === 'clarify' || intent.type === 'unavailable') {
-          update(room, { state: 'ready', answer: intent.type === 'unavailable' ? 'The local command interpreter is unavailable. No action was taken. You can still use the direct controls.' : commandClarification(question), resultKind: 'clarification' }); return;
+          const clarification = intent.type === 'unavailable' ? 'The local command interpreter is unavailable. No action was taken. You can still use the direct controls.' : commandClarification(question);
+          if (intent.type === 'clarify') toolAgent.ask(context, clarification);
+          respond({ state: 'ready', answer: clarification, resultKind: 'clarification' }); return;
         }
       }
       if (!stillCurrent()) return;
       if (local) {
         if (local.kind === 'calendar-preview') {
-          if (local.clearCalendar) { await tracked('hide_calendar', async () => ({ ok: true })); update(room, { state: 'ready', answer: local.answer, resultKind: local.kind, calendarPreview: null, calendarDraft: null }); calendarDrafts.delete(room); return; }
-          if (!(await calendar.status()).connected) { await tracked('preview_calendar', async () => ({ ok: false })); update(room, { state: 'ready', answer: 'Google Calendar is not connected yet. Open House setup to connect it.', resultKind: local.kind }); return; }
+          if (local.clearCalendar) { await tracked('hide_calendar', async () => ({ ok: true })); respond({ state: 'ready', answer: local.answer, resultKind: local.kind, calendarPreview: null, calendarDraft: null }); calendarDrafts.delete(room); return; }
+          if (!(await calendar.status()).connected) { await tracked('preview_calendar', async () => ({ ok: false })); respond({ state: 'ready', answer: 'Google Calendar is not connected yet. Open House setup to connect it.', resultKind: local.kind }); return; }
           try {
-            const preview = await tracked('preview_calendar', () => calendar.preview({ range: local.range, timeZone: process.env.JARVIS_TIMEZONE || 'America/Chicago' }));
-            update(room, { state: 'ready', answer: local.answer, resultKind: local.kind, calendarPreview: preview, calendarDraft: null }); calendarDrafts.delete(room); return;
+            const preview = await tracked('preview_calendar', () => calendar.preview({ range: local.range, date: dateForRequest(question, { timeZone: context.timeZone }), timeZone: process.env.JARVIS_TIMEZONE || 'America/Chicago' }));
+            respond({ state: 'ready', answer: local.answer, resultKind: local.kind, calendarPreview: preview, calendarDraft: null }); calendarDrafts.delete(room); return;
           } catch (error) {
-            update(room, { state: 'ready', answer: error.status === 401 ? error.message : 'I could not load Google Calendar just now. Please try again.', resultKind: local.kind }); return;
+            respond({ state: 'ready', answer: error.status === 401 ? error.message : 'I could not load Google Calendar just now. Please try again.', resultKind: local.kind }); return;
           }
         }
         if (local.kind === 'view') {
-          update(room, { view: local.view, state: 'ready', answer: local.answer, resultKind: 'view' }); return;
+          respond({ view: local.view, state: 'ready', answer: local.answer, resultKind: 'view' }); return;
         }
-        update(room, { state: 'ready', answer: local.answer, resultKind: local.kind, ...(local.kind === 'reminder' ? { calendarPreview: null } : {}) }); return;
+        respond({ state: 'ready', answer: local.answer, resultKind: local.kind, ...(local.kind === 'reminder' ? { calendarPreview: null } : {}) }); return;
       }
-      if (device) { update(room, { state: 'ready', answer: device.answer, resultKind: device.kind }); return; }
+      if (device) { respond({ state: 'ready', answer: device.answer, resultKind: device.kind }); return; }
       const unavailable = unavailableConnection(question);
       if (unavailable) {
-        update(room, { state: 'ready', answer: unavailable });
+        respond({ state: 'ready', answer: unavailable });
         return;
       }
-      const key = historyKey(room, profile?.id);
-      const messages = (history.get(key) || []).slice(-4).map(message => ({ ...message, content: message.content.slice(0, 350) }));
-      const preference = speakerPrompt({ profile, speaker, household });
+      }
+      const messages = route.mode === 'coding' ? codingMessages(turn.messages, question, route.contextTokens, route.outputTokens) : turn.messages.map(message => ({ ...message, content: message.content.slice(0, 700) }));
+      const preference = speakerPrompt({ profile, speaker, household: await profiles.list() });
       const upstream = await fetch(new URL('/api/chat', base), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         signal: controller.signal,
         body: JSON.stringify({
-          model,
-          messages: [{ role: 'system', content: systemPrompt + preference }, ...messages, { role: 'user', content: `Answer this current question: ${question}` }],
+          model: route.model,
+          messages: [{ role: 'system', content: (route.mode === 'coding' ? codingPrompt : systemPrompt) + preference }, ...messages, { role: 'user', content: `Answer this current question: ${question}` }],
           stream: true,
           think: false,
           keep_alive: '5m',
-          options: { num_ctx: 2048, num_predict: profile?.answerStyle === 'detailed' ? 300 : 180, temperature: 0.7, repeat_penalty: 1.1, repeat_last_n: 256 },
+          options: { num_ctx: route.contextTokens, num_predict: route.mode === 'coding' ? route.outputTokens : profile?.answerStyle === 'detailed' ? 300 : 180, temperature: route.mode === 'coding' ? 0.2 : 0.7, repeat_penalty: 1.1, repeat_last_n: 256 },
         }),
       });
       if (!upstream.ok) {
-        const error = new Error(upstream.status === 404 ? `The model ${model} is missing. Open Ollama and download it, then try again.` : 'Ollama could not answer. Try a shorter question or check the Ollama app.');
+        const error = new Error(upstream.status === 404 ? `The model ${route.model} is missing. Open Ollama and download it, then try again.` : 'Ollama could not answer. Try a shorter question or check the Ollama app.');
         throw error;
       }
       let buffer = '';
@@ -454,7 +549,7 @@ export function createJarvisServer({ model = process.env.JARVIS_MODEL || 'qwen3:
         if (item.error) throw new Error('Ollama could not finish this answer. Check the Ollama app and try again.');
         if (item.message?.content) {
           answer += item.message.content;
-          if (stillCurrent()) update(room, { state: 'answering', answer });
+          if (stillCurrent()) respond({ state: 'answering', answer });
         }
         if (item.done) { completed = true; truncated = item.done_reason === 'length'; }
       }
@@ -471,15 +566,14 @@ export function createJarvisServer({ model = process.env.JARVIS_MODEL || 'qwen3:
       if (buffer.trim()) acceptLine(buffer);
       if (!stillCurrent()) return;
       if (!completed || !answer.trim()) throw new Error('The answer ended early. Please try again.');
-      history.set(key, [...(history.get(key) || []), { role: 'user', content: question }, { role: 'assistant', content: answer.trim() }].slice(-4));
-      update(room, { state: 'ready', answer: answer.trim(), truncated });
+      respond({ state: 'ready', answer: answer.trim(), truncated });
     } catch (error) {
       if (!stillCurrent()) return;
       if (controller.signal.aborted && controller.signal.reason?.message === 'cancelled') {
         cancel(room);
       } else {
         const message = controller.signal.aborted ? 'That answer took too long. Try a shorter question.' : error instanceof TypeError ? 'I cannot reach Ollama. Open the Ollama app, then try again.' : error.message;
-        update(room, { state: 'error', answer: '', error: message });
+        respond({ state: 'error', answer: '', error: message });
       }
     } finally {
       activity.endRequest(requestId, controller.signal.aborted && controller.signal.reason?.message === 'cancelled' ? 'cancelled' : 'failed');
@@ -507,6 +601,37 @@ export function createJarvisServer({ model = process.env.JARVIS_MODEL || 'qwen3:
         const file = await readFile(new URL(filename, publicRoot));
         response.writeHead(200, { 'Content-Type': mime, 'Cache-Control': 'no-cache' });
         return response.end(file);
+      }
+      if (request.method === 'GET' && url.pathname === '/api/phones') return json(response, 200, await phoneStatus());
+      if (request.method === 'POST' && url.pathname === '/api/phones/pairing') {
+        const body = await readJson(request);
+        if (!(await phoneStatus()).enabled) return json(response, 409, { error: 'Enable phone access with SETUP-PHONE.cmd first.' });
+        const room = requireRoom(body?.room), profile = await profiles.get(body?.profileId);
+        if (body.profileId && !profile) return json(response, 400, { error: 'Choose a current roommate profile.' });
+        return json(response, 200, await phonePairing.start(room, profile?.id || null));
+      }
+      if (request.method === 'POST' && url.pathname === '/api/phones/revoke') {
+        const body = await readJson(request);
+        if (typeof body.id !== 'string' || body.id.length > 80) return json(response, 400, { error: 'Choose a paired phone.' });
+        await phonePairing.revoke(body.id); return json(response, 200, { ok: true });
+      }
+      if (request.method === 'GET' && url.pathname === '/api/tv-launch') return json(response, 200, await tvLaunch.status());
+      if (request.method === 'POST' && url.pathname === '/api/tv-launch') return json(response, 200, await tvLaunch.configure(await readJson(request)));
+      if (request.method === 'POST' && url.pathname === '/api/tv-launch/test') {
+        await readJson(request);
+        const info = await tvLaunch.status();
+        if (!info.target) return json(response, 409, { error: 'Save a paired TV target before testing.' });
+        return json(response, 200, await activity.track({ room: info.target.room }, 'show_tv', () => tvLaunch.ensure(info.target.room, { force: true }), r => r.ok ? 'completed' : r.state === 'unconfirmed' ? 'waiting' : 'failed'));
+      }
+      if (request.method === 'GET' && url.pathname === '/api/models') {
+        const room = requireRoom(url.searchParams.get('room') || 'bedroom-1');
+        const profile = await profiles.get(url.searchParams.get('profileId'));
+        await modelRouter.initialize();
+        return json(response, 200, { ...await modelRouter.catalog(), active: modelRouter.route({ room, profileId: profile?.id }) });
+      }
+      if (request.method === 'POST' && url.pathname === '/api/models') {
+        if (active || recognitionActive) return json(response, 409, { error: 'Wait for the current request to finish before changing models.' });
+        return json(response, 200, await modelRouter.configure(await readJson(request)));
       }
       if (request.method === 'GET' && url.pathname === '/api/startup') return json(response, 200, await readStartupStatus());
       if (request.method === 'GET' && url.pathname === '/api/health') return json(response, 200, { app: 'jarvis-local-house', projectId: projectId(APP_ROOT), pid: process.pid, uptimeSeconds: Math.floor(process.uptime()) });
@@ -612,7 +737,7 @@ export function createJarvisServer({ model = process.env.JARVIS_MODEL || 'qwen3:
       if (request.method === 'GET' && url.pathname === '/api/search/status') return json(response, 200, webSearch.status());
       if (request.method === 'GET' && url.pathname === '/api/listen/status') return json(response, 200, wakeword.status());
       if (request.method === 'POST' && url.pathname === '/api/listen/start') {
-        const body = await readJson(request);
+        const body = await readJson(request, url.pathname === '/api/ask' ? 131072 : 16384);
         const room = requireRoom(body?.room);
         const info = await wakeword.start(room);
         if (response.destroyed) { wakeword.stop(info.token); return; }
@@ -634,7 +759,7 @@ export function createJarvisServer({ model = process.env.JARVIS_MODEL || 'qwen3:
         return json(response, 200, await wakeword.predict(token, Buffer.concat(chunks)));
       }
       if (request.method === 'GET' && url.pathname === '/api/network') return json(response, 200, await actions.network.check());
-      if (request.method === 'GET' && url.pathname === '/api/house-status') return json(response, 200, { homeAssistant: await homeAssistant.status({ checkConnection: true }), microphone: recognition.status(), calendars: await calendar.status(), phone: { configured: false }, personalAuthentication: false });
+      if (request.method === 'GET' && url.pathname === '/api/house-status') return json(response, 200, { homeAssistant: await homeAssistant.status({ checkConnection: true }), microphone: recognition.status(), calendars: await calendar.status(), phone: { configured: (await phoneStatus()).enabled }, personalAuthentication: false });
       if (request.method === 'GET' && url.pathname === '/api/displays') return json(response, 200, { ...await pairing.list(), enabled: Boolean(displayServer?.server.listening), receiverUrl: displayServer?.server.listening ? `http://${displayBind}:${displayServer.server.address().port}` : null });
       if (request.method === 'POST' && url.pathname === '/api/pairing/start') {
         const body = await readJson(request);
@@ -777,7 +902,7 @@ export function createJarvisServer({ model = process.env.JARVIS_MODEL || 'qwen3:
         return;
       }
       if (request.method === 'POST' && ['/api/ask', '/api/cancel', '/api/reset'].includes(url.pathname)) {
-        const body = await readJson(request);
+        const body = await readJson(request, url.pathname === '/api/ask' ? 131072 : 16384);
         const room = requireRoom(body?.room);
         let profile = await profiles.get(body?.profileId);
         if (url.pathname !== '/api/ask') {
@@ -786,22 +911,23 @@ export function createJarvisServer({ model = process.env.JARVIS_MODEL || 'qwen3:
           cancel(room, url.pathname === '/api/reset', profile?.id, body.interruption === true && url.pathname === '/api/cancel');
           return json(response, 200, { ok: true });
         }
-        if (typeof body.question !== 'string' || !body.question.trim() || body.question.length > 600) {
-          return json(response, 400, { error: 'Ask a question using 1 to 600 characters.' });
-        }
+        if (typeof body.question !== 'string' || !body.question.trim() || body.question.length > 24000) return json(response, 400, { error: 'Enter a question of up to 24,000 characters.' });
         if (active || recognitionActive) return json(response, 409, { error: 'Jarvis is already answering or recognizing speech. Wait a moment, or stop the current question.' });
         let speaker = speakerTurns.consume({ token: body.speakerToken, room, text: body.question });
         if (speaker?.status === 'matched') {
           profile = await profiles.get(speaker.profileId);
           if (!profile?.voiceEnrolled) { profile = null; speaker = { status: 'unknown', profileId: null, reason: 'no-enrollments', authorized: false }; }
         } else if (speaker?.status === 'unknown') profile = null;
+        await modelRouter.initialize();
+        const selectedRoute = modelRouter.route({ room, profileId: profile?.id });
+        if (body.question.length > selectedRoute.maxInputChars) return json(response, 400, { error: selectedRoute.mode === 'coding' ? `Keep this coding request under ${selectedRoute.maxInputChars.toLocaleString()} characters.` : 'Switch to coding mode for longer code inputs; normal mode accepts up to 600 characters.' });
         const requestId = randomUUID();
         const controller = new AbortController();
         invalidateSpeech(room);
         clearTimeout(expiryTimers.get(room));
         expiryTimers.delete(room);
         active = { room, requestId, controller };
-        state.set(room, { ...initialState(state.get(room).view, state.get(room).calendarPreview, state.get(room).calendarDraft), state: 'thinking', requestId, profileId: profile?.id || null, notification: state.get(room).notification });
+        state.set(room, { ...initialState(state.get(room).view, state.get(room).calendarPreview, state.get(room).calendarDraft), state: 'thinking', requestId, profileId: profile?.id || null, modelMode: selectedRoute.mode, modelName: selectedRoute.model, maxInputChars: selectedRoute.maxInputChars, notification: state.get(room).notification });
         publish(room);
         json(response, 202, { requestId });
         void generate(room, body.question.trim(), requestId, controller, profile, speaker, ['minimal', 'dashboard'].includes(body.viewContext) ? body.viewContext : null);
@@ -815,6 +941,7 @@ export function createJarvisServer({ model = process.env.JARVIS_MODEL || 'qwen3:
   });
 
   async function shutdown() {
+    phoneClosed = true; await phoneStarting; await phoneAccess?.close(); await phonePairing.close();
     speakerTurns.close();
     speakerId.close?.();
     await profiles.close();
@@ -823,6 +950,7 @@ export function createJarvisServer({ model = process.env.JARVIS_MODEL || 'qwen3:
     await reminders.close();
     await chores.close();
     await calendar.close();
+    await tvLaunch.close();
     await displayServer?.close();
     await pairing.close();
     recognitionActive?.controller.abort();
@@ -834,7 +962,7 @@ export function createJarvisServer({ model = process.env.JARVIS_MODEL || 'qwen3:
     for (const roomClients of clients.values()) for (const client of roomClients) client.end();
     await new Promise(resolve => server.close(resolve));
   }
-  return { server, displayServer: displayServer?.server, shutdown };
+  return { server, displayServer: displayServer?.server, shutdown, startPhoneAccess };
 }
 
 if (process.argv[1] && pathToFileURL(fileURLToPath(import.meta.url)).href === pathToFileURL(process.argv[1]).href) {
@@ -846,6 +974,7 @@ if (process.argv[1] && pathToFileURL(fileURLToPath(import.meta.url)).href === pa
   });
   app.server.listen(port, '127.0.0.1', () => {
     console.log(`Jarvis is ready: http://127.0.0.1:${port}`);
+    void app.startPhoneAccess();
     console.log('Press Enter on the page to ask a question. Press Escape to dismiss.');
     console.log('Local microphone recognition and neural spoken replies are ready. Connect Google Calendar in House setup when ready.');
   });

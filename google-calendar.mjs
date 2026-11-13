@@ -16,9 +16,10 @@ function midnight(text, zone) { const [y,m,d] = text.split('-').map(Number), wal
 const checkedDate = value => { if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null; const date = new Date(value+'T00:00:00Z'); return Number.isFinite(date.valueOf()) && date.toISOString().slice(0,10) === value ? value : null; };
 
 // Fictional display data only: this function never opens a Google connection.
-export function createCalendarDemo({ range = 'day', timeZone = 'America/Chicago', now = Date.now() } = {}) {
+export function createCalendarDemo({ range = 'day', date = null, timeZone = 'America/Chicago', now = Date.now() } = {}) {
   if (!['day', 'week'].includes(range)) throw Object.assign(new Error('Choose a day or week demo.'), { status: 400 });
-  const today = dateText(parts(new Date(now), timeZone));
+  if (date && !checkedDate(date)) throw Object.assign(new Error('Choose a valid calendar date.'), { status: 400 });
+  const today = date || dateText(parts(new Date(now), timeZone));
   const weekday = new Date(today + 'T12:00:00Z').getUTCDay();
   const start = range === 'week' ? addDays(today, -((weekday + 6) % 7)) : today;
   const at = (date, hour, minute = 0) => {

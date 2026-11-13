@@ -57,6 +57,18 @@ export function createChores({ directory = path.join(APP_ROOT, 'private'), profi
     next.updatedAt = now(); next.version++;
     await persist(items.map(i => i.id === next.id ? next : i)); return { ...next };
   });
+  const revertedVersions = new Map();
+  const revert = ({ before, after }) => serial(async () => {
+    await ready();
+    const current = items.find(i => i.id === after.id);
+    if (!current || current.version !== (revertedVersions.get(after.id + ':' + after.version) ?? after.version)) throw fail('That chore has changed since your request. I left the newer changes in place.', 409);
+    if (before && !valid(before)) throw fail('The original chore could not be restored.', 409);
+    const restored = before ? { ...before, version: current.version + 1, updatedAt: now() } : null;
+    await persist(restored ? items.map(i => i.id === current.id ? restored : i) : items.filter(i => i.id !== current.id));
+    if (before) revertedVersions.set(before.id + ':' + before.version, restored.version);
+    if (revertedVersions.size > 100) revertedVersions.delete(revertedVersions.keys().next().value);
+    return { ok: true };
+  });
   async function handle(question, profileId) {
     const q = question.trim().replace(/^(?:hey\s+)?jarvis[,\s:]*/i, '').replace(/^(?:please\s+)?(?:(?:can|could|would) you\s+)?/i, '').replace(/[?.!]+$/, '');
     if (/^(?:(?:show|list|read|check|open)(?: me)? (?:the |our |my )?(?:household )?(?:chores|chore list)|what (?:are |are on )?(?:the |our |my )?(?:chores|chore list))$/i.test(q)) {
@@ -66,16 +78,16 @@ export function createChores({ directory = path.join(APP_ROOT, 'private'), profi
       return { ok: true, summary: visible.length ? visible.map(i => i.title + (i.assigneeId ? ', assigned to ' + (info.profiles.find(p => p.id === i.assigneeId)?.name || 'a former housemate') : ', unassigned') + (i.dueDate ? ', due ' + i.dueDate : '')).slice(0, 8).join('. ') + (visible.length > 8 ? '. More chores are on the household list.' : '.') : 'There are no open chores' + (/\bmy\b/i.test(q) ? ' assigned to this profile.' : '.') };
     }
     const addMatch = q.match(/^(?:add|create) (.+?) (?:to (?:the |our )?(?:household )?chore list|as a chore)$/i);
-    if (addMatch) { const item = await add({ title: addMatch[1] }); return { ok: true, summary: 'Added ' + item.title + ' to the household chores. It is unassigned.' }; }
+    if (addMatch) { const item = await add({ title: addMatch[1] }); return { ok: true, summary: 'Added ' + item.title + ' to the household chores. It is unassigned.', undo: () => revert({ before: null, after: item }) }; }
     const doneMatch = q.match(/^(?:mark|complete|finish) (?:the )?chore (.+?)(?: (?:as )?(?:done|complete|finished))?$/i);
     if (doneMatch) {
       const info = await list(), title = doneMatch[1].toLowerCase();
       if (!info.available) return { ok: false, summary: 'The saved chores file needs attention. No chore was changed.' };
       const found = info.chores.filter(i => i.title.toLowerCase() === title);
       if (found.length !== 1) return { needsInterpretation: true, summary: 'Which chore? Use its title from the household chore list.' };
-      const item = await update({ id: found[0].id, version: found[0].version, done: true }); return { ok: true, summary: 'Marked ' + item.title + ' complete.' };
+      const item = await update({ id: found[0].id, version: found[0].version, done: true }); return { ok: true, summary: 'Marked ' + item.title + ' complete.', undo: () => revert({ before: found[0], after: item }) };
     }
     return null;
   }
-  return { initialize, list, add, update, handle, close: async () => { await initialized; await chain; } };
+  return { initialize, list, add, update, revert, handle, close: async () => { await initialized; await chain; } };
 }

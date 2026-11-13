@@ -18,7 +18,7 @@ const publicAssets = new Map([
 ]);
 const json = (response, status, data) => { response.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); response.end(JSON.stringify(data)); };
 export function createDisplayServer({ pairing, bindAddress, snapshot, subscribe, dashboard, allowedHosts = [] } = {}) {
-  const streams = new Map();
+  const streams = new Map(), presence = new Map();
   const hosts = new Set([bindAddress, '127.0.0.1', 'localhost', ...allowedHosts]);
   const server = http.createServer(async (request, response) => {
     response.setHeader('X-Content-Type-Options', 'nosniff'); response.setHeader('Referrer-Policy', 'no-referrer');
@@ -47,6 +47,15 @@ export function createDisplayServer({ pairing, bindAddress, snapshot, subscribe,
       const token = request.headers.cookie?.split(';').map(part => part.trim()).find(part => part.startsWith('jarvis_display='))?.slice('jarvis_display='.length);
       const session = await pairing.authenticate(token);
       if (!session) return json(response, 401, { error: 'Pair this display from the central computer.' });
+      if (request.method === 'POST' && url.pathname === '/api/presence') {
+        if (request.headers['content-type'] !== 'application/json') return json(response, 415, { error: 'Use the paired receiver page.' });
+        const chunks = []; let size = 0;
+        for await (const chunk of request) { size += chunk.length; if (size > 512) return json(response, 413, { error: 'Presence update is too large.' }); chunks.push(chunk); }
+        let body; try { body = JSON.parse(Buffer.concat(chunks).toString()); } catch { return json(response, 400, { error: 'Invalid presence update.' }); }
+        if (!body || Object.keys(body).some(key => key !== 'visible') || typeof body.visible !== 'boolean') return json(response, 400, { error: 'Invalid presence update.' });
+        presence.set(session.id, { visible: body.visible, at: Date.now() });
+        return json(response, 200, { ok: true });
+      }
       if (request.method === 'GET' && url.pathname === '/api/display-session') return json(response, 200, session);
       if (request.method === 'GET' && url.pathname === '/api/dashboard') {
         if (snapshot(session.room).view !== 'dashboard' || !dashboard) return json(response, 403, { error: 'Ask Jarvis to show the dashboard for this room.' });
@@ -73,8 +82,9 @@ export function createDisplayServer({ pairing, bindAddress, snapshot, subscribe,
       else response.end();
     }
   });
-  function revoke(id) { for (const response of streams.get(id) || []) { response.write('event: revoked\ndata: {}\n\n'); response.end(); } streams.delete(id); }
+  function revoke(id) { presence.delete(id); for (const response of streams.get(id) || []) { response.write('event: revoked\ndata: {}\n\n'); response.end(); } streams.delete(id); }
   async function close() { for (const id of streams.keys()) revoke(id); if (server.listening) await new Promise(resolve => server.close(resolve)); }
   const connectedIds = () => [...streams].filter(([, clients]) => [...clients].some(client => !client.destroyed)).map(([id]) => id);
-  return { server, revoke, close, connectedIds };
+  const isVisible = id => { const seen = presence.get(id); return Boolean(seen?.visible && Date.now() - seen.at < 12000 && [...(streams.get(id) || [])].some(client => !client.destroyed)); };
+  return { server, revoke, close, connectedIds, isVisible };
 }

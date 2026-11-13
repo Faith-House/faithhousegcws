@@ -118,7 +118,7 @@ export function createLocalActions({ rooms, onTimer = () => {}, dataDirectory = 
       const timer = { id: randomUUID(), room, label: match[2]?.trim().slice(0, 60) || '', createdAt: now(), endsAt: now() + duration * 1000 };
       timers.push(timer);
       try { await save(); } catch { timers = timers.filter(item => item.id !== timer.id); return { answer: 'I could not save the timer, so it has not been set.', kind: 'timer' }; }
-      return { answer: `${timer.label ? `Your ${timer.label} timer` : 'Your timer'} is set for ${describeDuration(duration)}. Keep Jarvis open for the alert.`, kind: 'timer', timer };
+      return { answer: `${timer.label ? `Your ${timer.label} timer` : 'Your timer'} is set for ${describeDuration(duration)}. Keep Jarvis open for the alert.`, kind: 'timer', timer, undo: () => cancelCreated(timer) };
     }
     if (/^(?:(?:show|list|check) (?:my |our |the )?(?:active )?timers|how much time is left(?: on (?:my |the )?timer)?|(?:my )?timers|timer status)$/.test(command)) {
       await initialize();
@@ -140,6 +140,15 @@ export function createLocalActions({ rooms, onTimer = () => {}, dataDirectory = 
     }
     return null;
   }
+  const cancelCreated = timer => serialize(async () => {
+    await initialize();
+    if (storageError) throw Object.assign(new Error('The saved timer file needs attention.'), { status: 503 });
+    const found = timers.find(t => t.id === timer.id && t.room === timer.room && t.endsAt === timer.endsAt && t.endsAt > now());
+    if (!found) throw Object.assign(new Error('That timer has already finished or been cancelled.'), { status: 409 });
+    const before = timers; timers = timers.filter(t => t.id !== timer.id);
+    try { await save(); } catch (error) { timers = before; throw error; }
+    return { ok: true };
+  });
   const handle = input => serialize(() => handleInternal(input));
   async function close() { closed = true; clearInterval(interval); await operations; await saving.catch(() => {}); }
   const listTimers = () => serialize(async () => {

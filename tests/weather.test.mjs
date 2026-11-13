@@ -69,3 +69,12 @@ test('server routes weather before internet search and restricts location writes
   const activity=await(await fetch(base+'/api/activity?room=living-room')).json();assert.ok(activity.entries.some(e=>e.tool==='get_weather'&&e.status==='completed'));
  }finally{await app.shutdown();}
 });
+
+
+test('named weekdays select the measured forecast day and reject dates beyond the provider window',async()=>{
+ const f=await fixture();await f.weather.configure({locationId:city.id});
+ const saturday=await f.weather.answer('Weather for Saturday in Chicago');
+ assert.equal(saturday.ok,true);assert.match(saturday.summary,/Saturday/);assert.match(saturday.summary,/61°F/);
+ assert.equal(saturday.patch.weatherPreview.selectedDate,'2026-11-14');assert.equal(saturday.patch.weatherPreview.range,'day');
+ assert.equal((await f.weather.answer('Weather for 2026-12-01')).ok,false);
+});

@@ -2,7 +2,7 @@
 
 Jarvis — a local house assistant prototype
 
-Updated November 11, 2026. This prototype provides a central computer dashboard, typed and spoken questions, local “Hey Jarvis” detection, real local Ollama answers, Peter and other local neural spoken replies, orange Jarvis rings, and a Google Calendar setup path. It uses one computer. Models and software are downloaded during setup; microphone processing, AI, speech, and HUD assets run locally afterward.
+Updated November 13, 2026. This prototype provides a central computer dashboard, typed and spoken questions, local “Hey Jarvis” detection, real local Ollama answers, Peter and other local neural spoken replies, orange Jarvis rings, and a Google Calendar setup path. It uses one computer. Models and software are downloaded during setup; microphone processing, AI, speech, and HUD assets run locally afterward.
 
 ## Start
 
@@ -17,9 +17,21 @@ This computer's software and models are installed. The desktop shortcut runs OPE
 
 The central computer opens the Control room at http://127.0.0.1:3210/. It shows measured processor, memory, and storage use, server uptime, this computer’s network checks, actual housemate profiles, room/screen pairings, saved active timers, and activity from the current browser session. Weather, Home Assistant, and phone connections are labeled unavailable until configured; no random metrics or sample appointments are used. Quiet view at /assistant retains the minimal full-screen assistant.
 
-Say or type **“Show the dashboard”** or **“Pull up the dashboard on the TV.”** The central computer switches in place; a paired TV for the selected room follows while its Jarvis receiver is open. Say **“Back to Jarvis”** or **“Close the dashboard”** to restore the minimal view. The same canvas, speech player, and listening session continue without a page reload. A paired TV is not required for the computer's dashboard. The dashboard stays open between answers until dismissed; a server restart resets TVs to minimal mode. A command does not wake a powered-off TV or switch away from another TV app/HDMI.
+Say or type **“Show the dashboard”** or **“Pull up the dashboard on the TV.”** The central computer switches in place; a paired TV for the selected room follows while its Jarvis receiver is open. Say **“Back to Jarvis”** or **“Close the dashboard”** to restore the minimal view. The same canvas, speech player, and listening session continue without a page reload. A paired TV is not required for the computer's dashboard. The dashboard stays open between answers until dismissed; a server restart resets TVs to minimal mode. Without automatic TV launch enabled, a command does not wake a powered-off TV or switch away from another TV app/HDMI.
 
 The TV receives only its assigned room’s timers, responses, and screen information, plus shared host readings and household names. It does not receive voice templates, other rooms’ activity, or central control access. If a shared calendar preview is requested, that room’s paired TV receives its event titles and times. The mode switch does not navigate the browser or change its address. Refresh the TV receiver once to load this update; the existing pairing remains valid.
+
+## Automatic Samsung TV launch — physical test pending
+
+Open **TV launch** in the question panel or visit /tv-launch. This new integration can connect questions in one paired display's room to the saved Samsung remote connection. It reuses the approved local token and pinned TLS certificate. Select the test display, save with automatic launch off, and use **Test opening Jarvis on the TV** when someone can see the screen. The setup supports the existing single Samsung test TV; additional TVs need their own approved remote connections before expanding this mapping.
+
+The launcher requests the Tizen browser with the exact local receiver URL, then tries the known numeric Samsung Internet app ID if no receiver presence arrives. The paired receiver now reports foreground visibility. An open network connection alone is not treated as proof that Jarvis is visible. If the browser remains on its home page or needs pairing, the result stays unconfirmed. Physical appearance and navigation must be checked on the actual TV; this path has only been tested with simulated remote transport and paired receiver sessions so far.
+
+After a successful physical test, enable automatic launch. Questions in the assigned room then request the TV in the background while the assistant answers. The answer remains available while launch is pending. Other rooms do not operate this TV. Wake-on-LAN is optional and requires the TV's MAC address and compatible enabled standby network wake; a wake packet does not prove the TV powered on. Previous TV apps/HDMI are not automatically restored, and this does not overlay Jarvis on a show.
+
+Automatic launch and wake remain off by default. The user said the TV was not available for a launch test, so no browser, input or power commands were sent to the physical TV during this implementation. The saved remote token and pinned certificate are not exposed by the setup routes. The central control interface stays on localhost; the TV receiver retains only its room's read-only access plus its own presence heartbeat. Phone access is available separately through the paired HTTPS gateway described below.
+
+A changed computer LAN address requires updating the receiver address and may require pairing the TV browser once at the new address. Refresh a previously open receiver page once to load the presence reporting update. Receiver or navigation failures appear in the TV launch page and tool activity, rather than becoming a spoken success claim. Protocol references: [SamsungTVWS browser launcher](https://github.com/xchwarze/samsung-tv-ws-api/blob/master/samsungtvws/remote.py) and [Home Assistant Samsung wake guidance](https://www.home-assistant.io/integrations/samsungtv/#turn-on-action).
 
 ## Google Calendar preview
 
@@ -53,6 +65,40 @@ Jarvis uses a local tool registry and planner for compound requests and unfamili
 Routine direct commands keep their fast handlers. More flexible requests use local Ollama to propose bounded tool calls. Arguments are checked before a batch executes; results come from the handlers. Conditional requests read actual data before changes. A failure stops later steps. The current small model can still misunderstand, so test each additional use case. No RAG pipeline is used.
 
 See TOOLS.md for the tool catalog, execution limits, measured local examples, model settings, and current service limitations.
+
+## Phone access
+
+Phone access is implemented and a phone pairing was confirmed by the user. Run **SETUP-PHONE.cmd** on the central Windows computer once to prepare a local CA and server certificate for its current private Wi-Fi address. The helper needs OpenSSL (it uses the Git for Windows copy by default; set JARVIS_OPENSSL for another installed executable). It does not change Windows or phone certificate trust. Restart Jarvis after setup, then open **Phone access** at /phones on the computer.
+
+The Phone access page shows the current certificate setup address, secure phone address and CA fingerprint. Open the setup address on the phone on the same trusted Wi-Fi, install/trust the public Jarvis CA certificate after comparing the fingerprint, then open secure Jarvis. On the computer, choose the phone's room/profile and create a one-use five-minute code. Pair the phone with that code; no voice recording is required. The user confirmed successful pairing on November 12. Physical phone microphone capture and spoken playback still need their own user check.
+
+The phone interface supports typed requests, tap-to-record local transcription, local spoken replies and calendar/weather previews. Speech is transcribed on the central computer; check the transcript and send it. The orange Jarvis rings remain on the phone. Each phone's room/profile comes from pairing, not from fields it can override. It can stop or request audio only for its own latest request. Disconnect a phone on /phones or from the phone itself; sessions expire after 30 days. Central configuration, voice enrollment, model setup and raw profile data are not exposed to the phone gateway.
+
+The certificate-only HTTP setup listener uses port 3214 and the HTTPS phone app uses port 3215 by default, bound to the configured private interface. The central app stays loopback-only. Raw phone tokens and TLS signing/private keys stay under private/ and must not be committed or distributed. No router forwarding, global certificate trust, firewall rule changes, cellular access or background phone wake-word listening were added. Keep the central computer awake. A changed LAN address requires re-running setup to renew the server certificate, restarting Jarvis and possibly pairing at the new address. See [Apple certificate trust](https://support.apple.com/en-us/102390), [Google certificate settings](https://support.google.com/pixelphone/answer/2844832?hl=en) and [browser microphone secure-context requirements](https://developer.mozilla.org/en-US/docs/Web/API/MediaDevices/getUserMedia#privacy_and_security).
+
+## Daily weather display
+
+Daily weather reports for current conditions, today, tomorrow or a named day now occupy most of the quiet screen, with a large temperature, animated condition symbol, forecast date and a wide metrics row. Current conditions include available wind and humidity readings; future days show forecast high/low and precipitation without relabeling today's measurements. Weather requests switch to quiet view so the report is not confined to the dashboard card. The central computer and paired TV use the same renderer. Use the close button on the computer or say “Close weather.” Weekly forecasts retain their seven-day grid. Reduced-motion preferences stop the condition-symbol orbit animation.
+
+## Normal mode and coding mode
+
+Jarvis now has a separate, configurable local model slot for coding. Open **AI models** in the question panel, or visit http://127.0.0.1:3210/models. Install the chosen model in Ollama on the target computer, refresh the page, and save it as the coding model. The everyday model stays JARVIS_MODEL (currently qwen3:0.6b). A coding model has not been selected or downloaded automatically: the future Beelink's exact RAM/GPU specifications are still needed to choose the final model. Installing a larger model here does not prove it will run well on this current 8 GB computer.
+
+Say “coding mode,” “switch to developer mode,” or “normal mode.” A switch checks that the second model is installed locally; a missing model leaves the current mode unchanged and explains the setup needed. Each room/profile has its own mode. Mode resets to normal on New conversation or server restart; the configured coding model persists locally in private/model-routing.json. Cloud-model tags and known remote-backed entries are not offered.
+
+Coding answers use the second model, an 8,192-token context and up to 2,048 output tokens by default, a longer timeout, longer pasted inputs and a readable monospace answer layout. Set JARVIS_CODING_CONTEXT and JARVIS_CODING_OUTPUT before startup to tune the limits for the target computer. The input limit is bounded by the configured context. Short-lived conversation history is reused with a bounded budget. Switching does not preload the weights; the next coding answer may take longer while Ollama loads them. Normal answers and household tool planning retain the fast model.
+
+Coding mode can write, explain, review and debug supplied code. It has no repository editor or terminal connected and does not claim to have changed files or run tests. Pasted code is kept out of household action routing; explicit short household commands still use existing tools. Use the existing spoken-reply controls if you prefer code answers silently on screen. See [Ollama chat API](https://docs.ollama.com/api/chat) for local model selection and runtime options.
+
+## Follow-ups, multiple actions, clarification and undo
+
+Conversation context includes both tool results and ordinary answers, scoped to the current room and roommate profile. It expires after five minutes without a completed turn and is cleared by Reset. This is short-lived local conversation context, not long-term memory. Try “What is the weather tomorrow?” followed by “What about Saturday?” or “Show the demo calendar” followed by “Make it a week view.” Weekday weather is limited to the provider’s seven-day forecast. Calendar previews support named weekdays and tomorrow; demo follow-ups stay fictional.
+
+A single request can contain several actions: “Set a timer for two minutes and add water the plant as a chore and show the dashboard.” Recognized common clauses use a fast parser; unfamiliar phrasing goes to the local Ollama planner. All calls in a planned batch are validated before changes. Later steps stop if a handler fails, and the response reports the completed steps. Public web search remains a separate terminal request. The small local model can still ask for rephrasing when it cannot produce a valid plan.
+
+Missing details produce a short question: “Remind me to check the oven” → “When should I remind you?” → “In five minutes.” Clarification lasts two minutes in the same room/profile. “Never mind” drops the pending request. A new unrelated request replaces it.
+
+Say or type “Undo that” to reverse the most recent supported request in this room/profile, including its supported actions in reverse order. Supported changes are newly created chores, reminders and active timers; chore completion and assignment; and voice/typed dashboard or calendar-preview changes. Reading the clock or a list does not consume undo history. Chore undo refuses to overwrite a newer edit. Finished timers, removed reminders, unsupported device/calendar writes and changes made directly in other pages are not automatically reversible. Undo history lasts ten minutes, stays in memory, and clears on Reset or server restart. Tool activity records undo outcomes.
 
 ## Voice-reactive rings
 

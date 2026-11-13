@@ -1,3 +1,4 @@
+import { dateForRequest } from './conversation.mjs';
 import { mkdir, readFile, writeFile, rename } from 'node:fs/promises';
 import path from 'node:path';
 import { APP_ROOT } from './voice-config.mjs';
@@ -55,6 +56,7 @@ export function createWeather({ directory = path.join(APP_ROOT, 'private'), fetc
   async function status() { await initialize(); const fresh = cached && now()-cached.fetchedAt < cacheMs && cached.location.id === config?.location.id && cached.units === config?.units && cached.today === householdDate(now(),config.location.timeZone); return { configured: Boolean(config), configurationError: broken, provider: 'Open-Meteo', location: config?.location || null, units: config?.units || 'imperial', connected: Boolean(fresh), fetchedAt: fresh ? cached.fetchedAt : null }; }
   async function read({ signal, place = null } = {}) {
     await initialize(); let selected = config;
+    if (place && config && [config.location.name, config.location.label].some(value => value.toLowerCase() === place.toLowerCase())) place = null;
     if (place) { let matches = await search(place,signal); if (place.includes(',')) { const exact = matches.filter(m => m.name.toLowerCase() === place.split(',')[0].trim().toLowerCase()); if (exact.length === 1) matches = exact; } if (matches.length !== 1) throw fail(matches.length ? 'Which location? Try a city and state or country, such as “weather in '+ matches[0].label +'”.' : 'I could not find that weather location. Try a city and state or country.'); selected = { location: matches[0], units: config?.units || 'imperial' }; }
     if (!selected || broken) throw fail(broken ? 'The saved weather configuration needs attention.' : 'Set your home city on the Weather page first, or ask for weather in a specific city.',409);
     const key = selected.location.id + ':' + selected.units;
@@ -80,14 +82,19 @@ export function createWeather({ directory = path.join(APP_ROOT, 'private'), fetc
   async function answer(question,{signal}={}) {
     const intent=weatherIntent(question);
     const temperature=(value,unit)=>value===null?'unavailable':Math.round(value)+unit;
-    if (/\b(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|weekend|next week|next month)\b/i.test(question)) return {ok:false,summary:'I can show current weather, today, tomorrow, or the next seven days. Which would you like?'};
+    if (/\b(?:weekend|next week|next month)\b/i.test(question)) return {ok:false,summary:'I can show current weather, today, tomorrow, or the next seven days. Which would you like?'};
     try {
-      const data=await read({signal,place:intent.place}), degree=data.temperatureUnit, day=data.days[intent.range==='tomorrow'?1:0];
+      const data=await read({signal,place:intent.place}), degree=data.temperatureUnit;
+      const namedDay = /\b(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|\d{4}-\d{2}-\d{2})\b/i.test(question);
+      const selectedDate = namedDay ? dateForRequest(question, { now: now(), timeZone: data.location.timeZone }) : null;
+      const day = namedDay ? data.days.find(d => d.date === selectedDate) : data.days[intent.range==='tomorrow'?1:0];
+      if (!day) return { ok: false, summary: 'That date is outside the available seven-day forecast. Which day in the next seven days would you like?' };
+      if (namedDay) intent.range = 'day';
       let summary;
       if(intent.range==='current') summary=`In ${data.location.label}, it is ${rounded(data.current.temperature)}${degree} with ${data.current.condition.toLowerCase()}.`+(data.current.feelsLike!==null?` It feels like ${rounded(data.current.feelsLike)}${degree}.`:'')+(data.current.wind!==null?` Wind is ${rounded(data.current.wind)} ${data.windUnit}.`:'');
       else if(intent.range==='week') summary=`Here is the seven-day forecast for ${data.location.label}. `+data.days.slice(0,3).map(d=>`${new Intl.DateTimeFormat('en-US',{weekday:'long',timeZone:'UTC'}).format(new Date(d.date+'T12:00:00Z'))}: ${d.condition.toLowerCase()}, high ${temperature(d.high,degree)} and low ${temperature(d.low,degree)}.`).join(' ');
-      else summary=`${intent.range==='tomorrow'?'Tomorrow':'Today'} in ${data.location.label}: ${day.condition.toLowerCase()}, high ${temperature(day.high,degree)} and low ${temperature(day.low,degree)}.`+(day.rainChance!==null?` The maximum daily precipitation probability is ${rounded(day.rainChance)}%.`:'');
-      return {ok:true,summary,patch:{calendarPreview:null,weatherPreview:{...data,range:intent.range}}};
+      else summary=`${namedDay ? new Intl.DateTimeFormat('en-US',{weekday:'long',month:'short',day:'numeric',timeZone:'UTC'}).format(new Date(day.date+'T12:00:00Z')) : intent.range==='tomorrow'?'Tomorrow':'Today'} in ${data.location.label}: ${day.condition.toLowerCase()}, high ${temperature(day.high,degree)} and low ${temperature(day.low,degree)}.`+(day.rainChance!==null?` The maximum daily precipitation probability is ${rounded(day.rainChance)}%.`:'');
+      return {ok:true,summary,patch:{view:'minimal',calendarPreview:null,weatherPreview:{...data,range:intent.range,...(namedDay ? { selectedDate } : {})}}};
     } catch(error) { if(signal?.aborted)throw signal.reason;return {ok:false,summary:error.status?error.message:'I could not retrieve a weather forecast. Please try again.'}; }
   }
   return {initialize,status,search,configure,read,answer};

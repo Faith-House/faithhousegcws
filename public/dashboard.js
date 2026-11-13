@@ -121,7 +121,7 @@ async function refresh() {
     const ready = Boolean(data.ai?.available && data.ai?.modelInstalled);
     $('overall-status').classList.toggle('warning', !ready); $('overall-status').lastElementChild.textContent = ready ? 'Local AI ready' : 'AI needs attention';
     $('overall-status').firstElementChild.className = `status-dot${ready ? '' : ' warning'}`;
-    $('ai-dot').className = `status-dot${ready ? '' : ' muted'}`; $('ai-label').textContent = ready ? `${data.ai.model} · on this computer` : 'Local AI unavailable';
+    $('ai-dot').className = `status-dot${ready ? '' : ' muted'}`; $('ai-label').textContent = ready ? `${data.ai.model} · everyday model` : 'Local AI unavailable';
     $('voice-label').textContent = data.speech.available ? 'Neural voice · local' : 'Voice unavailable';
     if (previousReady !== ready) { addActivity(ready ? 'Connected to local AI' : 'Local AI needs attention'); previousReady = ready; }
     const host = data.system;
@@ -154,7 +154,7 @@ async function checkNetwork() {
   finally { networkBusy = false; $('network-refresh').disabled = false; }
 }
 function syncAssistant(ui = {}) {
-  if (['view', 'calendar-demo'].includes(ui.resultKind) && ui.requestId && ui.requestId !== lastViewCommand && ['dashboard', 'minimal'].includes(ui.view)) { lastViewCommand = ui.requestId; setCentralView(ui.view); }
+  if (['view', 'calendar-demo', 'weather'].includes(ui.resultKind) && ui.requestId && ui.requestId !== lastViewCommand && ['dashboard', 'minimal'].includes(ui.view)) { lastViewCommand = ui.requestId; setCentralView(ui.view); }
   const nativeTalk = $('microphone'), nativeListen = $('wake-toggle');
   $('dashboard-talk').disabled = nativeTalk.disabled; $('dashboard-talk').lastChild.nodeValue = nativeTalk.textContent;
   $('dashboard-listen').disabled = nativeListen.disabled;

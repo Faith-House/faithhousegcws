@@ -13,7 +13,7 @@
 <div class="dashboard-shell">
   <header class="dashboard-topbar">
     <a class="dashboard-brand" href="/" aria-label="Jarvis control room"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span><span>JARVIS<small>CENTRAL COMPUTER</small></span></a>
-    <nav class="dashboard-nav" aria-label="Main navigation"><a href="/profiles">Housemates</a><a href="/weather">Weather</a><a href="/chores">Chores</a><a href="/activity">Tool activity</a><a href="/reminders">Reminders</a><a href="/diagnostics">Diagnostics</a><a href="/setup">House setup</a><a id="quiet-view" href="/assistant?room=bedroom-1">Quiet view <span aria-hidden="true">↗</span></a></nav>
+    <nav class="dashboard-nav" aria-label="Main navigation"><a href="/profiles">Housemates</a><a href="/weather">Weather</a><a href="/chores">Chores</a><a href="/activity">Tool activity</a><a href="/reminders">Reminders</a><a href="/diagnostics">Diagnostics</a><a href="/phones">Phone access</a><a href="/models">AI models</a><a href="/tv-launch">TV launch</a><a href="/setup">House setup</a><a id="quiet-view" href="/assistant?room=bedroom-1">Quiet view <span aria-hidden="true">↗</span></a></nav>
     <div id="overall-status" class="overall-status"><span class="status-dot"></span><span>Connecting locally</span></div>
   </header>
   <div class="dashboard-heading"><div><p class="eyebrow">YOUR HOUSE, AT A GLANCE</p><h1>Control room<span class="heading-dot">.</span></h1></div><div class="room-picker"><label for="dashboard-room">Speak to</label><select id="dashboard-room" aria-label="Dashboard room"><option value="bedroom-1">Bedroom 1</option><option value="bedroom-2">Bedroom 2</option><option value="bedroom-3">Bedroom 3</option><option value="bedroom-4">Bedroom 4</option><option value="living-room">Living room</option></select></div></div>
@@ -97,6 +97,7 @@
     </div>
     <form id="question-form" class="question-form">
       <label class="sr-only" for="question">Your question</label>
+      <p id="model-mode-notice" class="setup-muted" hidden></p>
       <textarea id="question" rows="1" maxlength="600" placeholder="Ask me anything…" autocomplete="off" spellcheck="true" required></textarea>
       <button id="send" class="send-button" type="submit" aria-label="Send question"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6"/></svg></button>
     </form>
@@ -117,7 +118,7 @@
       <button id="refresh-voices" type="button">Refresh voices</button>
     </div>
     <p id="voice-availability" class="voice-availability" hidden></p>
-    <div class="composer-footer"><span>Enter to send · Esc to dismiss</span><a href="/reminders">Reminders ↗</a><a href="/profiles">Profiles</a><a href="/reminders">Reminders</a><a href="/weather">Weather</a><a href="/chores">Chores</a><a href="/activity">Tool activity</a><a href="/diagnostics">Diagnostics</a><a href="/setup">House setup</a><button id="reset" type="button">New conversation</button></div>
+    <div class="composer-footer"><span>Enter to send · Esc to dismiss</span><a href="/reminders">Reminders ↗</a><a href="/profiles">Profiles</a><a href="/reminders">Reminders</a><a href="/weather">Weather</a><a href="/chores">Chores</a><a href="/activity">Tool activity</a><a href="/diagnostics">Diagnostics</a><a href="/models">AI models</a><a href="/setup">House setup</a><button id="reset" type="button">New conversation</button></div>
     <p id="form-error" class="form-error" role="alert" hidden></p>
   </section>
 </body></html>

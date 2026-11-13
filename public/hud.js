@@ -40,6 +40,8 @@ let resumeWanted = false;
 let wakeResumeTimer;
 let wakeSyncQueued = false;
 let roommateProfiles = [];
+let activeModelRoute = { mode: 'normal', maxInputChars: 600 };
+let modelRefreshEpoch = 0;
 let selectedProfileId = '';
 let globalSpeechMuted;
 let speakerNotice = '';
@@ -200,6 +202,9 @@ function updateVisuals() {
   const voiceMessage = speech.message || (speech.state === 'preparing' ? 'Preparing spoken reply…' : '');
   $('response').hidden = Boolean(calendarData || snapshot.weatherPreview) || !(text || voiceMessage);
   $('answer').textContent = text || '';
+  $('answer').classList.toggle('coding', snapshot.modelMode === 'coding');
+  $('question').maxLength = activeModelRoute.maxInputChars || 600;
+  if ($('model-mode-notice')) { $('model-mode-notice').hidden = activeModelRoute.mode !== 'coding'; $('model-mode-notice').textContent = 'Coding mode · ' + (activeModelRoute.model || snapshot.modelName || '') + ' · Say “normal mode” to switch back'; }
   $('answer').classList.toggle('long', (text || '').length > 160);
   if ($('weather-link')) $('weather-link').hidden = snapshot.resultKind !== 'weather';
   if ($('chores-link')) $('chores-link').hidden = snapshot.resultKind !== 'chores';
@@ -262,6 +267,7 @@ function speakCurrent(force = false) {
 function render(snapshot) {
   const changed = lastSnapshot.requestId !== snapshot.requestId;
   lastSnapshot = snapshot;
+  if (snapshot.modelMode && (snapshot.profileId || '') === selectedProfileId) activeModelRoute = { mode: snapshot.modelMode, model: snapshot.modelName, maxInputChars: snapshot.maxInputChars || (snapshot.modelMode === 'coding' ? 16384 : 600) };
   const notification = snapshot.notification;
   $('timer-alert').hidden = !notification;
   $('timer-message').textContent = notification?.message || '';
@@ -339,6 +345,15 @@ function connect() {
 }
 connect();
 void loadVoices();
+async function refreshModelRoute() {
+  if (displayOnly) return;
+  const epoch = ++modelRefreshEpoch;
+  try {
+    const response = await fetch('/api/models?room=' + encodeURIComponent(room) + '&profileId=' + encodeURIComponent(selectedProfileId), { cache: 'no-store' });
+    if (!response.ok) return; const info = await response.json();
+    if (epoch !== modelRefreshEpoch) return; activeModelRoute = info.active; updateVisuals();
+  } catch { /* Existing conversation controls remain usable. */ }
+}
 function applyProfile(id, persist = true) {
   const profile = roommateProfiles.find(item => item.id === id);
   selectedProfileId = profile?.id || '';
@@ -349,6 +364,7 @@ function applyProfile(id, persist = true) {
   $('voice-enabled').checked = voiceEnabled;
   if (Array.from($('voice').options).some(option => option.value === voice)) $('voice').value = voice;
   updateVisuals();
+  void refreshModelRoute();
 }
 async function refreshProfiles() {
   if (displayOnly) return;
@@ -513,6 +529,7 @@ roomSelect.addEventListener('change', () => {
   render({ state: 'idle', answer: '', error: '' });
   formError('');
   connect();
+  void refreshModelRoute();
 });
 document.addEventListener('keydown', async event => {
   if (event.key === 'Escape') {
@@ -572,3 +589,5 @@ window.addEventListener('pagehide', () => {
   stopHandsFree(); $('wake-audio').pause(); $('timer-audio').pause(); microphone.cancel(); speech.destroy(); events?.close(); orb.destroy(); clearTimeout(reconnectTimer);
 });
 window.addEventListener('pageshow', event => { if (event.persisted) location.reload(); });
+
+document.addEventListener('jarvis:close-weather', () => { void submitQuestion('Close weather'); });

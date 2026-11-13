@@ -58,6 +58,7 @@
     </div>
     <form id="question-form" class="question-form">
       <label class="sr-only" for="question">Your question</label>
+      <p id="model-mode-notice" class="setup-muted" hidden></p>
       <textarea id="question" rows="1" maxlength="600" placeholder="Ask me anything…" autocomplete="off" spellcheck="true" required></textarea>
       <button id="send" class="send-button" type="submit" aria-label="Send question"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6"/></svg></button>
     </form>
@@ -78,7 +79,7 @@
       <button id="refresh-voices" type="button">Refresh voices</button>
     </div>
     <p id="voice-availability" class="voice-availability" hidden></p>
-    <div class="composer-footer"><span>Enter to send · Esc to dismiss</span><a href="/profiles">Profiles</a><a href="/weather">Weather</a><a href="/chores">Chores</a><a href="/activity">Tool activity</a><a href="/diagnostics">Diagnostics</a><a href="/setup">House setup</a><button id="reset" type="button">New conversation</button></div>
+    <div class="composer-footer"><span>Enter to send · Esc to dismiss</span><a href="/profiles">Profiles</a><a href="/weather">Weather</a><a href="/chores">Chores</a><a href="/activity">Tool activity</a><a href="/diagnostics">Diagnostics</a><a href="/phones">Phone access</a><a href="/models">AI models</a><a href="/tv-launch">TV launch</a><a href="/setup">House setup</a><button id="reset" type="button">New conversation</button></div>
     <p id="form-error" class="form-error" role="alert" hidden></p>
   </section>
 </body>

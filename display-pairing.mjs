@@ -5,7 +5,7 @@ import { APP_ROOT } from './voice-config.mjs';
 
 const fail = (message, status = 400) => Object.assign(new Error(message), { status });
 const digest = token => createHash('sha256').update(token).digest('hex');
-export function createDisplayPairing({ rooms, directory = path.join(APP_ROOT, 'private'), now = Date.now, onRevoke = () => {} } = {}) {
+export function createDisplayPairing({ rooms, directory = path.join(APP_ROOT, 'private'), now = Date.now, onRevoke = () => {}, includeProfile = false } = {}) {
   const filename = path.join(directory, 'displays.json');
   let devices = [], pending = new Map(), attempts = new Map(), allAttempts = [];
   let loaded, corrupt = false, writes = Promise.resolve();
@@ -34,7 +34,7 @@ export function createDisplayPairing({ rooms, directory = path.join(APP_ROOT, 'p
     await initialize();
     return { configurationError: corrupt, devices: devices.filter(device => device.expiresAt > now()).map(({ hash, ...device }) => device) };
   }
-  async function startInternal(room) {
+  async function startInternal(room, profileId = null) {
     await initialize();
     if (corrupt) throw fail('The saved TV pairing file needs attention before another TV can be paired.', 503);
     if (!rooms.includes(room)) throw fail('Choose a valid room.');
@@ -42,7 +42,8 @@ export function createDisplayPairing({ rooms, directory = path.join(APP_ROOT, 'p
     for (const [code, entry] of pending) if (entry.expiresAt <= now() || entry.room === room) pending.delete(code);
     let code;
     do { code = String(randomInt(0, 1000000)).padStart(6, '0'); } while (pending.has(code));
-    const entry = { room, expiresAt: now() + 300000 };
+    if (includeProfile && profileId !== null && (typeof profileId !== 'string' || profileId.length > 80)) throw fail('Choose a valid roommate profile.');
+    const entry = { room, ...(includeProfile ? { profileId } : {}), expiresAt: now() + 300000 };
     pending.set(code, entry);
     return { code, ...entry };
   }
@@ -59,19 +60,19 @@ export function createDisplayPairing({ rooms, directory = path.join(APP_ROOT, 'p
     if (typeof name !== 'string' || !name.trim() || name.length > 50) throw fail('Give this display a name using 1 to 50 characters.');
     pending.delete(code);
     const token = randomBytes(32).toString('base64url');
-    const device = { id: randomUUID(), hash: digest(token), room: entry.room, name: name.trim(), createdAt: now(), expiresAt: now() + 30 * 86400000 };
+    const device = { id: randomUUID(), hash: digest(token), room: entry.room, ...(includeProfile ? { profileId: entry.profileId || null } : {}), name: name.trim(), createdAt: now(), expiresAt: now() + 30 * 86400000 };
     devices = devices.filter(item => item.expiresAt > now());
     if (devices.length >= 12) throw fail('Remove an old display before pairing another one.');
     devices.push(device);
     try { await persist(); } catch { devices = devices.filter(item => item.id !== device.id); throw fail('The pairing could not be saved. No display access was granted.', 503); }
-    return { token, room: device.room, id: device.id, name: device.name };
+    return { token, room: device.room, id: device.id, name: device.name, ...(includeProfile ? { profileId: device.profileId || null } : {}) };
   }
   async function authenticate(token) {
     await initialize();
     if (corrupt || typeof token !== 'string' || !/^[a-zA-Z0-9_-]{43}$/.test(token)) return null;
     const hash = digest(token);
     const device = devices.find(item => item.hash === hash && item.expiresAt > now());
-    return device ? { id: device.id, room: device.room, name: device.name } : null;
+    return device ? { id: device.id, room: device.room, name: device.name, ...(includeProfile ? { profileId: device.profileId || null } : {}) } : null;
   }
   async function revokeInternal(id) {
     await initialize();
@@ -81,5 +82,5 @@ export function createDisplayPairing({ rooms, directory = path.join(APP_ROOT, 'p
     try { await persist(); } catch { devices = previous; throw fail('The saved pairing could not be changed.', 503); }
     onRevoke(id);
   }
-  return { list, start: room => serialize(() => startInternal(room)), pair: input => serialize(() => pairInternal(input)), authenticate, revoke: id => serialize(() => revokeInternal(id)), close: async () => { await mutations; await writes.catch(() => {}); } };
+  return { list, start: (room, profileId) => serialize(() => startInternal(room, profileId)), pair: input => serialize(() => pairInternal(input)), authenticate, revoke: id => serialize(() => revokeInternal(id)), close: async () => { await mutations; await writes.catch(() => {}); } };
 }

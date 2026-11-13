@@ -175,3 +175,5 @@ body.display-only .ask-button,body.display-only .hint,body.display-only .compose
 body.has-search .visual{width:min(330px,34vh,60vw)}
 body.has-search .response{max-height:48vh}
 @media(max-width:600px){body.has-search .visual{width:min(250px,28vh,64vw)}body.has-search .answer.long{font-size:19px;line-height:1.5}body.has-search .response{max-height:50vh}.search-links a{font-size:11px;padding:6px 8px}}
+
+.answer.coding{font-family:Consolas,monospace;font-size:clamp(14px,1.4vw,19px);text-align:left;letter-spacing:0;line-height:1.6;text-wrap:wrap;white-space:pre-wrap}

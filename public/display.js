@@ -10,10 +10,12 @@ import { RoomDashboard } from './tv-dashboard.js';
 const $ = id => document.getElementById(id);
 const orb = new JarvisOrb($('orb'));
 const dashboard = new RoomDashboard({ hud: $('hud'), onUnauthorized: () => showPairing('Pair this display again from House setup.') });
+let presenceTimer;
 let events, reconnectTimer, closed = false, sessionCheck, visualExpiry;
 let lastSnapshot = { state: 'idle' }, voiceVisual = null;
 orb.setLevelSource(() => voiceVisual?.level || 0);
 function showPairing(message = '') {
+  clearInterval(presenceTimer);
   dashboard.setView(false);
   clearTimeout(visualExpiry); voiceVisual = null;
   events?.close(); clearTimeout(reconnectTimer); clearTimeout(sessionCheck);
@@ -42,9 +44,15 @@ function render(snapshot) {
   $('timer-message').textContent = snapshot.notification?.message || '';
   dashboard.updateState(state);
 }
+async function reportPresence() {
+  if (closed || !$('pairing').hidden) return;
+  try { await fetch('/api/presence', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ visible: document.visibilityState === 'visible' }), signal: AbortSignal.timeout(2000) }); } catch { /* Next heartbeat retries. */ }
+}
+document.addEventListener('visibilitychange', () => void reportPresence());
 function connect() {
   if (closed) return;
   $('pairing').hidden = true;
+  clearInterval(presenceTimer); void reportPresence(); presenceTimer = setInterval(() => void reportPresence(), 5000);
   events?.close();
   events = new EventSource('/api/events');
   events.onopen = () => { clearTimeout(reconnectTimer); $('connection').hidden = true; };
@@ -86,5 +94,5 @@ $('pair-form').addEventListener('submit', async event => {
   finally { button.disabled = false; }
 });
 void checkSession();
-window.addEventListener('pagehide', () => { closed = true; dashboard.destroy(); events?.close(); clearTimeout(reconnectTimer); clearTimeout(sessionCheck); clearTimeout(visualExpiry); orb.destroy(); });
+window.addEventListener('pagehide', () => { if ($('pairing').hidden) void fetch('/api/presence', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ visible: false }), keepalive: true }).catch(() => {}); closed = true; clearInterval(presenceTimer); dashboard.destroy(); events?.close(); clearTimeout(reconnectTimer); clearTimeout(sessionCheck); clearTimeout(visualExpiry); orb.destroy(); });
 window.addEventListener('pageshow', event => { if (event.persisted) location.reload(); });
