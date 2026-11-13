@@ -16,7 +16,11 @@ export function createDiscordConfig({directory,profiles,rooms}={}){
   if(!input||Object.keys(input).some(k=>!['applicationId','guildId','token','voiceChannelIds','members'].includes(k)))throw fail('Use the Discord setup fields.');
   const token=input.token?.trim()?input.token.trim().replace(/^Bot /,''):data.token;
   const next={format:1,enabled:false,applicationId:input.applicationId,guildId:input.guildId,token,voiceChannelIds:input.voiceChannelIds,members:input.members};
-  if(!structural(next))throw fail('Enter the application ID, server ID, bot token and at least one linked Discord user. IDs must be copied from Discord, not usernames.');
+  if(!discordId(next.applicationId))throw fail('Application ID must be the numeric ID copied from your Discord application.');
+  if(!discordId(next.guildId))throw fail('Server ID must be the numeric ID copied from your Discord server.');
+  if(!validToken(next.token))throw fail('The Bot token is missing or has an unexpected format. Copy the token from Developer Portal → your application → Bot and paste it directly into the Bot token field.');
+  if(!Array.isArray(next.voiceChannelIds)||next.voiceChannelIds.some(id=>!discordId(id)))throw fail('Each approved voice channel must be a numeric channel ID. Leave this field blank to finish text setup first.');
+  if(!structural(next))throw fail('Link at least one Discord user to a Jarvis profile and room. Use numeric user IDs and do not link the same user twice.');
   const people=(await profiles.list()).profiles;
   if(next.members.some(m=>!people.some(p=>p.id===m.profileId)))throw fail('Link each Discord user to a current roommate profile.');
   await save(next);return publicConfig();

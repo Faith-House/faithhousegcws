@@ -22,6 +22,7 @@ const configuration={applicationId:appId,guildId,token,voiceChannelIds:[channelI
 
 test('Discord configuration persists credentials privately, redacts responses, validates identities and preserves damaged files',async()=>{
  const directory=await dir(),store=createDiscordConfig({directory,profiles,rooms:roomIds});
+ await assert.rejects(store.configure({...configuration,token:'invalid'}),/Bot token/);
  const saved=await store.configure(configuration);assert.equal(saved.hasToken,true);assert.equal(saved.enabled,false);assert.equal(JSON.stringify(saved).includes(token),false);
  assert.equal(JSON.parse(await readFile(path.join(directory,'discord.json'),'utf8')).token,token);
  await store.configure({...configuration,token:''});assert.equal((await store.credentials()).token,token);
