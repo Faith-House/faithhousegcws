@@ -11,7 +11,7 @@ Updated November 16, 2026. This prototype provides a central computer dashboard,
 3. Choose a room and select Talk to Jarvis, Type a question, or Hey Jarvis. Pressing Enter or clicking the rings also opens the question input.
 5. Type a question and press Enter. The input closes, the real answer streams onto the HUD, and Jarvis reads it aloud after the voice is prepared.
 
-This computer's software and models are installed. The desktop shortcut runs OPEN-JARVIS.ps1, which checks the local server identity, starts the installed recovery task when needed, and opens the browser. On a new computer, install Node.js 22 or later, run npm ci in this folder, then run SETUP-VOICE.cmd, SETUP-MICROPHONE.cmd, and SETUP-LISTENING.cmd once with internet access. Ollama and its conversation model are installed separately. Keep the computer awake while Jarvis is in use.
+This computer's software and models are installed. The desktop shortcut runs OPEN-JARVIS.ps1, which checks the local server identity, starts the installed recovery task when needed, and opens the browser. On a new computer, install Node.js 22.12 or later (Node.js 24 recommended), run npm ci in this folder, then run SETUP-VOICE.cmd, SETUP-MICROPHONE.cmd, and SETUP-LISTENING.cmd once with internet access. Ollama and its conversation model are installed separately. Keep the computer awake while Jarvis is in use.
 
 ## LangGraph agent harness
 

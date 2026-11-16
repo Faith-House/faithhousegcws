@@ -582,7 +582,7 @@ export function createJarvisServer({ model = process.env.JARVIS_MODEL || 'qwen3:
           turn = conversation.prepare(scope);
           question = turn.question;
           context = { ...toolContext(room, profile?.id, question, viewContext || state.get(room).view, controller.signal), requestId, messages: turn.messages };
-          compound = isCompoundToolRequest(question);
+          compound = isCompoundToolRequest(question) && (isCommandCandidate(question) || isWeatherRequest(question) || /\b(?:chores?|housework|remind(?:er|ers)?|computer|laptop|system|cpu|diagnostics?)\b/i.test(question));
           useAgentFirst = compound || toolAgent.hasPending(context);
           householdCommand = isUndoRequest(question) || (!/[`{}]/.test(question) && question.length <= 600 && (isWeatherRequest(question) || /^(?:(?:hey )?jarvis[, ]*)?(?:please )?(?:(?:can|could|would) you )?(?:show|open|close|hide|switch|go|set|start|stop|cancel|remind|list|mark|assign|add|turn|check)\b.*\b(?:dashboard|quiet|rings|timer|countdown|reminder|calendar|chores?|lights?|lamps?|network|connections)\b/i.test(question)));
         },

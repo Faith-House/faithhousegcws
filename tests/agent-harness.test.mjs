@@ -59,7 +59,7 @@ test('real HTTP requests route through LangGraph for tools and streamed model re
  const base='http://127.0.0.1:'+app.server.address().port,bridge=createDiscordBridge({baseUrl:()=>base});
  try{
   const clock=await bridge.ask('test',{room:'bedroom-1',profileId:null},'What time is it?');assert.match(clock.answer,/It is/);
-  const chat=await bridge.ask('test',{room:'bedroom-2',profileId:null},'Hello there');assert.equal(chat.answer,'I would choose the rice bowl.');
+  const chat=await bridge.ask('test',{room:'bedroom-2',profileId:null},'Give me three dinner ideas and tell me which is easiest.');assert.equal(chat.answer,'I would choose the rice bowl.');
   let status;
   for(let i=0;i<100;i++){status=await(await fetch(base+'/api/harness')).json();if(status.recent.length===2&&status.recent.every(r=>r.status==='completed'))break;await new Promise(r=>setTimeout(r,5));}
   assert.equal(status.engine,'LangGraph.js');assert.deepEqual(status.recent[0].steps,['prepare','route','actions','complete']);assert.deepEqual(status.recent[1].steps,['prepare','route','actions','conversation','complete']);
