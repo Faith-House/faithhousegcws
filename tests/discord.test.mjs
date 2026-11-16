@@ -190,3 +190,50 @@ test('Discord connection rejects missing channels, categories and missing reply 
   assert.equal(status.connected,false);assert.match(status.error,expected);assert.equal(fixture.command(),undefined);await service.close();
  }
 });
+
+test('short command replies and confirmations stay with their requester and expire',async()=>{
+ const requests=[];const fixture=textFixture({bridge:{ask:async(user,binding,question)=>{requests.push({user,question});return{answer:requests.length===1?'When should I remind you?':'Reminder saved.',resultKind:requests.length===1?'clarification':'tool-agent'};},stop:async()=>false}});
+ await fixture.service.handle(chatMessage('Jarvis, could you remind me to check the oven?'));
+ await fixture.service.handle(chatMessage('in five minutes'));assert.deepEqual(requests.map(r=>r.question),['could you remind me to check the oven?','in five minutes']);fixture.service.close();
+ const confirms=[];const second=textFixture({bridge:{ask:async(_user,_binding,q)=>{confirms.push(q);return{answer:'Confirm this event?',resultKind:'calendar-confirmation'};},stop:async()=>false}});
+ await second.service.handle(chatMessage('Jarvis, add a meeting to my calendar'));
+ await second.service.handle(chatMessage('yes'));assert.equal(confirms.at(-1),'yes');
+ second.tick(120001);await second.service.handle(chatMessage('yes'));assert.equal(confirms.length,2);second.service.close();
+});
+
+test('pending details cannot be supplied by another user or from another channel',async()=>{
+ const other='777777777777777777',secondChannel='888888888888888888',questions=[];
+ const fixture=textFixture({channelIds:[channelId,secondChannel],members:[...members,{...members[0],userId:other}],bridge:{ask:async(_u,_b,q)=>{questions.push(q);return{answer:'How long?',resultKind:'clarification'};},stop:async()=>false}});
+ await fixture.service.handle(chatMessage('Jarvis set a timer'));
+ await fixture.service.handle(chatMessage('two minutes',{author:{id:other}}));await fixture.service.handle(chatMessage('two minutes',{channelId:secondChannel}));
+ assert.equal(questions.length,1);await fixture.service.handle(chatMessage('two minutes'));assert.equal(questions.length,2);fixture.service.close();
+});
+
+test('natural stop interrupts only the linked speaker’s work even while the channel is busy',async()=>{
+ let release,started,signal;const began=new Promise(r=>started=r),other='777777777777777777',stops=[];
+ const fixture=textFixture({members:[...members,{...members[0],userId:other}],bridge:{stop:async user=>{stops.push(user);return false;}},decide:async request=>{signal=request.signal;started();await new Promise(r=>release=r);return{respond:true,toolRequest:false,answer:'Late answer'};}});
+ const original=chatMessage('Jarvis, suggest a dinner');const running=fixture.service.handle(original);await began;
+ await fixture.service.handle(chatMessage('Jarvis stop',{author:{id:other}}));assert.equal(signal.aborted,false);
+ const stop=chatMessage('stop');await fixture.service.handle(stop);assert.equal(signal.aborted,true);assert.equal(stop.replies.length,1);
+ release();await running;assert.equal(original.replies.length,0);assert.deepEqual(stops,[other,userId]);fixture.service.close();
+});
+
+test('natural Discord voice controls use the existing adapter rather than a model claim',async()=>{
+ const controls=[];const fixture=textFixture({control:async(command,message)=>{controls.push({command,user:message.author.id});return command==='join'?'Joined voice.':'Left voice.';}});
+ const join=chatMessage('Jarvis, could you join my voice channel?');await fixture.service.handle(join);await fixture.service.handle(chatMessage('leave the voice channel'));
+ assert.deepEqual(controls.map(c=>c.command),['join','leave']);assert.equal(join.replies[0].content,'Joined voice.');assert.equal(fixture.asked.length,0);fixture.service.close();
+});
+
+test('natural Discord commands create real chores, clarify a timer, and undo supported changes without slash syntax',async()=>{
+ const directory=await dir(),app=createJarvisServer({displayBind:'',phoneBind:'',profiles:{...profiles,initialize:async()=>{},close:async()=>{}},actionsOptions:{dataDirectory:directory},pairingOptions:{directory},speech:{listVoices:async()=>({available:false}),close(){}}});
+ await new Promise(r=>app.server.listen(0,'127.0.0.1',r));const base='http://127.0.0.1:'+app.server.address().port;
+ const bridge=createDiscordBridge({baseUrl:()=>base}),text=createDiscordText({guildId,channelIds:[channelId],members,profiles,bridge,botId:appId,decide:async()=>({respond:true,toolRequest:false,answer:'Conversation'})});
+ try{
+  const add=chatMessage('Jarvis, add verify Discord commands as a chore');await text.handle(add);await text.handle(add);
+  let chores=await(await fetch(base+'/api/chores')).json();assert.equal(chores.chores.filter(c=>c.title.toLowerCase()==='verify discord commands').length,1);
+  await text.handle(chatMessage('undo'));chores=await(await fetch(base+'/api/chores')).json();assert.equal(chores.chores.some(c=>c.title.toLowerCase()==='verify discord commands'),false);
+  const timer=chatMessage('Jarvis, set a timer');await text.handle(timer);assert.match(timer.replies[0].content,/How long/);
+  await text.handle(chatMessage('two minutes'));const dashboard=await(await fetch(base+'/api/dashboard')).json();assert.equal(dashboard.timers.timers.length,1);assert.equal(dashboard.timers.timers[0].endsAt-dashboard.timers.timers[0].createdAt,120000);
+  await text.handle(chatMessage('undo that'));const after=await(await fetch(base+'/api/dashboard')).json();assert.equal(after.timers.timers.length,0);
+ }finally{text.close();bridge.close();await app.shutdown();}
+});

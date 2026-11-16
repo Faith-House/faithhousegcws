@@ -11,7 +11,7 @@ export function createDiscordBridge({baseUrl,fetchImpl=fetch,timeoutMs=200000}={
    const reply=await accepted.json();if(!accepted.ok)throw fail(reply.error||'Jarvis could not accept that request.',accepted.status);
    job.requestId=reply.requestId;let buffer='',decoder=new TextDecoder();
    for await(const chunk of events.body){buffer+=decoder.decode(chunk,{stream:true});if(buffer.length>262144)throw fail('The reply stream was too large.',502);let boundary;
-    while((boundary=buffer.indexOf('\n\n'))>=0){const packet=buffer.slice(0,boundary);buffer=buffer.slice(boundary+2);if(!packet.startsWith('data: '))continue;const state=JSON.parse(packet.slice(6));if(state.requestId!==job.requestId)continue;if(state.state==='error')throw fail(state.error||'Jarvis could not answer.',502);if(state.state==='ready')return{answer:state.answer||'Done.',room:binding.room,requestId:state.requestId,profileId:binding.profileId};}
+    while((boundary=buffer.indexOf('\n\n'))>=0){const packet=buffer.slice(0,boundary);buffer=buffer.slice(boundary+2);if(!packet.startsWith('data: '))continue;const state=JSON.parse(packet.slice(6));if(state.requestId!==job.requestId)continue;if(state.state==='error')throw fail(state.error||'Jarvis could not answer.',502);if(state.state==='ready')return{answer:state.answer||'Done.',room:binding.room,requestId:state.requestId,profileId:binding.profileId,resultKind:state.resultKind||null};}
    }
    throw fail('Jarvis stopped before returning a reply.',502);
   }finally{controller.abort();if(active.get(userId)===job)active.delete(userId);}

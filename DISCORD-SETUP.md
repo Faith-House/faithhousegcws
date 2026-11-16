@@ -22,6 +22,25 @@ Natural replies are **public to the channel**. Household tool results may also a
 
 Discord requires [Message Content Intent](https://docs.discord.com/developers/events/gateway#message-content-intent) for ordinary content and [Read Message History](https://docs.discord.com/developers/resources/message#create-message) for replies.
 
+## Commands in ordinary text
+
+In an approved channel, mention Jarvis or start with his name. During your active conversation you can omit the name. Requests run with your linked roommate profile and assigned room, through the same validated household tools used by the central computer.
+
+- “Jarvis, add take out the trash as a chore.”
+- “Show the household chores.”
+- “Set a timer.” → Jarvis asks for a duration → “Two minutes.”
+- “Could you remind me to check the oven?” → “In five minutes.”
+- “Undo that.” Supported changes are reversed through the existing undo handler.
+- “Show the dashboard,” “Switch to quiet mode,” or “Show the demo calendar for this week.”
+- “What is the weather tomorrow?” or “Look up the latest space news.”
+- “Join my voice channel” or “Leave the voice channel.” Joining still requires you to be in an approved voice channel.
+- “Stop.” This interrupts your own in-flight text request and spoken reply, including while the channel is busy. Earlier completed actions remain in place.
+- “Discord status” or “Read my last answer.”
+
+Short tool details and calendar confirmation replies stay tied to the requesting Discord account in that channel for up to two minutes. A different user or channel cannot fill in that pending request. Calendar writes retain the existing explicit confirmation flow. Slash-command questions can also be continued in ordinary text in an approved channel. Background discussion has no tool execution access.
+
+Device commands still depend on connected Home Assistant devices and approved operations. Calls, router administration, arbitrary shell commands and private personal calendars are not added by this integration. Internet lookups return the actual search result; the model does not supply an invented completion. Natural language interpretation still depends on the local model when the existing direct handlers cannot recognize a request.
+
 ## Operation and limits
 
 Only explicitly linked Discord accounts are processed. Discord user IDs determine the profile; voice matching is not needed for Discord identity. These users can invoke Jarvis's existing household tools. Link people you trust with that access. The central computer's setup controls remain on localhost.

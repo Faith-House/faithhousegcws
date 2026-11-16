@@ -7,6 +7,14 @@ export function createDiscordIntegration({directory,profiles,rooms,bridge,loadSd
  const store=createDiscordConfig({directory,profiles,rooms}),last=new Map();
  let client=null,voice=null,text=null,connecting=null,epoch=0,connectionState='off',detail='Discord is not connected.',voiceState={state:'disconnected',channelId:null,detail:'Not in a voice channel.'},lastError='',stopped=false;
  const remember=(userId,result)=>{last.set(userId,{...result,at:now()});if(last.size>12)last.delete(last.keys().next().value);};
+ async function control(command,message){
+  if(command==='join'){if(!voice)throw Object.assign(Error('Discord voice is not ready. Reconnect Jarvis.'),{status:409});return voice.join({guildId:message.guildId,guild:message.guild,user:message.author});}
+  if(command==='leave'){await voice?.leave();return 'Jarvis left the voice channel.';}
+  if(command==='stop'){await voice?.stop(message.author.id);return 'Stopped your request.';}
+  if(command==='status')return 'Jarvis is connected. '+voiceState.detail;
+  if(command==='last'){const item=last.get(message.author.id);return item&&now()-item.at<300000?item.answer:'There is no recent tool reply for your Discord account.';}
+  throw Object.assign(Error('That Discord control is unavailable.'),{status:400});
+ }
  async function status(){const config=await store.status();const effectiveState=connectionState==='connected'&&client?.isReady&&!client.isReady()?'reconnecting':connectionState;const invite=config.applicationId&&config.guildId?'https://discord.com/oauth2/authorize?'+new URLSearchParams({client_id:config.applicationId,scope:'bot applications.commands',permissions:config.textChannelIds.length?'3247104':'3181568',guild_id:config.guildId,disable_guild_select:'true'}):null;return{...config,state:effectiveState,connected:effectiveState==='connected',detail,error:lastError,botName:client?.user?.tag||null,voice:voiceState,text:text?.status()||null,inviteUrl:invite};}
  async function handle(interaction){
   if(!interaction.isChatInputCommand()||interaction.commandName!=='jarvis')return;
@@ -16,10 +24,10 @@ export function createDiscordIntegration({directory,profiles,rooms,bridge,loadSd
   await interaction.deferReply({flags:64});
   try{
    const command=interaction.options.getSubcommand();let answer;
-   if(command==='ask'){const question=interaction.options.getString('question',true);const result=await bridge.ask(interaction.user.id,binding,question);remember(interaction.user.id,result);await interaction.editReply(discordReply(result.answer));return;}
+   if(command==='ask'){const question=interaction.options.getString('question',true);const result=await bridge.ask(interaction.user.id,binding,question);remember(interaction.user.id,result);text?.observeResult(interaction.channelId,interaction.user.id,result);await interaction.editReply(discordReply(result.answer));return;}
    if(command==='join'){if(!voice)throw Object.assign(Error('Discord voice is not ready. Reconnect the bot from Jarvis setup.'),{status:409});answer=await voice.join(interaction);}
    else if(command==='leave'){await voice?.leave();answer='Jarvis left the voice channel.';}
-   else if(command==='stop'){await(voice?.stop(interaction.user.id)||bridge.stop(interaction.user.id));answer='Stopped your running request or spoken reply, if one was active. Earlier completed actions remain in place.';}
+   else if(command==='stop'){await text?.stop(interaction.user.id);await(voice?.stop(interaction.user.id)||bridge.stop(interaction.user.id));answer='Stopped your running request or spoken reply, if one was active. Earlier completed actions remain in place.';}
    else if(command==='last'){const item=last.get(interaction.user.id);answer=item&&now()-item.at<300000?item.answer:'There is no recent reply for your Discord account. Use /jarvis ask first.';}
    else if(command==='status')answer='Jarvis is connected on the central computer. '+(voiceState.channelId?voiceState.detail:'Voice is disconnected. Join an approved channel and use /jarvis join.');
    else answer='Use /jarvis ask, join, leave, stop, last or status.';
@@ -50,7 +58,7 @@ export function createDiscordIntegration({directory,profiles,rooms,bridge,loadSd
     await guild.commands.create(jarvisCommand);
     voice=await voiceFactory({client:candidate,guildId:config.guildId,voiceChannelIds:config.voiceChannelIds,members:config.members,bridge,onAnswer:remember,onState:state=>{voiceState=state;}});
     if(stopped||epoch!==attempt){await voice.close();voice=null;candidate.destroy();return status();}
-    text=createDiscordText({guildId:config.guildId,channelIds:config.textChannelIds,members:config.members,profiles,bridge,decide:textDecide,botId:candidate.user.id,onAnswer:remember,now,isCurrent:()=>client===candidate&&connectionState==='connected',onError:message=>{lastError=message;}});
+    text=createDiscordText({guildId:config.guildId,channelIds:config.textChannelIds,members:config.members,profiles,bridge,decide:textDecide,botId:candidate.user.id,control,onAnswer:remember,now,isCurrent:()=>client===candidate&&connectionState==='connected',onError:message=>{lastError=message;}});
     await store.setEnabled(true);connectionState='connected';detail=config.textChannelIds.length?'Connected. Natural conversation is enabled in approved text channels.':'Connected. Slash commands are registered in the selected server.';return status();
    }catch(error){await disconnect({rememberDisabled:false});connectionState='error';detail='Discord connection could not finish.';lastError=error.setupDetail||'Check the bot token, matching application ID, server invite and bot permissions. For natural text chat, enable Message Content Intent in Developer Portal / Bot, then reconnect.';return status();}
   })().finally(()=>{connecting=null;});return connecting;
