@@ -1,3 +1,4 @@
+import { createAgentHarness } from './agent-harness.mjs';
 import { createDiscordTextModel } from './discord-text.mjs';
 import { createDiscordIntegration } from './discord-integration.mjs';
 import { createDiscordBridge } from './discord-bridge.mjs';
@@ -150,6 +151,7 @@ function unavailableConnection(question) {
 export function createJarvisServer({ model = process.env.JARVIS_MODEL || 'qwen3:0.6b', ollamaUrl = process.env.JARVIS_OLLAMA_URL || 'http://127.0.0.1:11434', requestTimeoutMs = 60000, speech = createLocalSpeech(), recognition = createLocalRecognition(), actionsOptions = {}, homeAssistant = createHomeAssistant(), displayBind = process.env.JARVIS_DISPLAY_BIND || '', pairingOptions = {}, wakeword = createWakeWordService(), profiles = createProfiles({ directory: actionsOptions.dataDirectory }), speakerId = createSpeakerIdentification(), webSearch = createWebSearch({ model, ollamaUrl }), diagnosticsOptions = {}, weatherOptions = {}, codingModel = process.env.JARVIS_CODING_MODEL || '', codingContext = process.env.JARVIS_CODING_CONTEXT || 8192, codingOutput = process.env.JARVIS_CODING_OUTPUT || 2048, codingTimeoutMs = 180000, tvLaunchOptions = {}, phoneBind = process.env.JARVIS_PHONE_BIND || '', phonePort = Number(process.env.JARVIS_PHONE_PORT || 3215), phoneSetupPort = Number(process.env.JARVIS_PHONE_SETUP_PORT || 3214), discordOptions = {} } = {}) {
   const state = new Map(ROOMS.map(room => [room, initialState()]));
   const conversation = createConversation();
+  const harness = createAgentHarness();
   const undoHistory = createUndoHistory();
   const clients = new Map(ROOMS.map(room => [room, new Set()]));
   const expiryTimers = new Map();
@@ -350,9 +352,7 @@ export function createJarvisServer({ model = process.env.JARVIS_MODEL || 'qwen3:
     const activityContext = { room, requestId, signal: controller.signal };
     const originalQuestion = question;
     const scope = { room, profileId: profile?.id || null, question, requestId, signal: controller.signal, mode: route.mode };
-    const turn = conversation.prepare(scope);
-    question = turn.question;
-    const context = { ...toolContext(room, profile?.id, question, viewContext || state.get(room).view, controller.signal), requestId, messages: turn.messages };
+    let turn, context, compound, useAgentFirst, finalReply, householdCommand;
     const tracked = (tool, task, classify) => activity.track(activityContext, tool, async () => {
       const result = await task();
       if (result && result.ok !== false) undoHistory.record(scope, { ...result, undoUnsupported: result.ok === true && ['cancel_timer', 'cancel_reminder', 'control_device', 'add_calendar_event'].includes(tool) });
@@ -372,7 +372,7 @@ export function createJarvisServer({ model = process.env.JARVIS_MODEL || 'qwen3:
             return { patch: saved };
           } });
         }
-        conversation.remember(scope, { question, answer: patch.answer, kind: patch.resultKind, place: patch.weatherPreview?.location?.label || null });
+        finalReply = patch;
       }
       update(room, { ...patch, modelMode: route.mode, modelName: route.model, maxInputChars: route.maxInputChars });
     };
@@ -380,10 +380,9 @@ export function createJarvisServer({ model = process.env.JARVIS_MODEL || 'qwen3:
       if (!result.handled || !stillCurrent()) return false;
       respond({ state: 'ready', answer: result.answer, ...(result.patch || {}), resultKind: result.clarification ? 'clarification' : result.patch?.view ? 'view' : 'tool-agent', toolActivity: result.activity || [] }); return true;
     };
-    const compound = isCompoundToolRequest(question);
-    const useAgentFirst = compound || toolAgent.hasPending(context);
     try {
       void bringUpTv(room, requestId, controller.signal).catch(() => {});
+      const runActions = async () => {
       const modeIntent = modelModeIntent(originalQuestion);
       if (modeIntent) {
         const result = await tracked('set_model_mode', () => modelRouter.switchMode(scope, modeIntent));
@@ -391,7 +390,6 @@ export function createJarvisServer({ model = process.env.JARVIS_MODEL || 'qwen3:
         if (stillCurrent()) respond({ state: 'ready', answer: result.summary, resultKind: 'model-mode' });
         return;
       }
-      const householdCommand = isUndoRequest(question) || (!/[`{}]/.test(question) && question.length <= 600 && (isWeatherRequest(question) || /^(?:(?:hey )?jarvis[, ]*)?(?:please )?(?:(?:can|could|would) you )?(?:show|open|close|hide|switch|go|set|start|stop|cancel|remind|list|mark|assign|add|turn|check)\b.*\b(?:dashboard|quiet|rings|timer|countdown|reminder|calendar|chores?|lights?|lamps?|network|connections)\b/i.test(question)));
       if (route.mode !== 'coding' || householdCommand) {
       if (isUndoRequest(originalQuestion)) {
         toolAgent.clear(context);
@@ -527,6 +525,8 @@ export function createJarvisServer({ model = process.env.JARVIS_MODEL || 'qwen3:
         return;
       }
       }
+      };
+      const runConversation = async () => {
       const messages = route.mode === 'coding' ? codingMessages(turn.messages, question, route.contextTokens, route.outputTokens) : turn.messages.map(message => ({ ...message, content: message.content.slice(0, 700) }));
       const preference = speakerPrompt({ profile, speaker, household: await profiles.list() });
       const upstream = await fetch(new URL('/api/chat', base), {
@@ -575,6 +575,26 @@ export function createJarvisServer({ model = process.env.JARVIS_MODEL || 'qwen3:
       if (!stillCurrent()) return;
       if (!completed || !answer.trim()) throw new Error('The answer ended early. Please try again.');
       respond({ state: 'ready', answer: answer.trim(), truncated });
+      };
+      await harness.run({ requestId, sessionKey: JSON.stringify(['room', room, profile?.id || 'shared']) }, {
+        isCurrent: stillCurrent,
+        prepare: () => {
+          turn = conversation.prepare(scope);
+          question = turn.question;
+          context = { ...toolContext(room, profile?.id, question, viewContext || state.get(room).view, controller.signal), requestId, messages: turn.messages };
+          compound = isCompoundToolRequest(question);
+          useAgentFirst = compound || toolAgent.hasPending(context);
+          householdCommand = isUndoRequest(question) || (!/[`{}]/.test(question) && question.length <= 600 && (isWeatherRequest(question) || /^(?:(?:hey )?jarvis[, ]*)?(?:please )?(?:(?:can|could|would) you )?(?:show|open|close|hide|switch|go|set|start|stop|cancel|remind|list|mark|assign|add|turn|check)\b.*\b(?:dashboard|quiet|rings|timer|countdown|reminder|calendar|chores?|lights?|lamps?|network|connections)\b/i.test(question)));
+        },
+        route: () => {
+          return modelModeIntent(originalQuestion) || route.mode !== 'coding' || householdCommand ? 'actions' : 'conversation';
+        },
+        actions: async () => { await runActions(); return Boolean(finalReply); },
+        conversation: runConversation,
+        complete: () => {
+          if (finalReply) conversation.remember(scope, { question, answer: finalReply.answer, kind: finalReply.resultKind, place: finalReply.weatherPreview?.location?.label || null });
+        },
+      }, { signal: controller.signal });
     } catch (error) {
       if (!stillCurrent()) return;
       if (controller.signal.aborted && controller.signal.reason?.message === 'cancelled') {
@@ -647,8 +667,9 @@ export function createJarvisServer({ model = process.env.JARVIS_MODEL || 'qwen3:
       }
       if (request.method === 'GET' && url.pathname === '/api/startup') return json(response, 200, await readStartupStatus());
       if (request.method === 'GET' && url.pathname === '/api/health') return json(response, 200, { app: 'jarvis-local-house', projectId: projectId(APP_ROOT), pid: process.pid, uptimeSeconds: Math.floor(process.uptime()) });
+      if (request.method === 'GET' && url.pathname === '/api/harness') return json(response, 200, harness.status());
       if (request.method === 'GET' && url.pathname === '/api/status') {
-        return json(response, 200, { ...await checkModel(), rooms: ROOMS, busy: Boolean(active || recognitionActive), microphone: recognition.status(), prototype: true });
+        return json(response, 200, { ...await checkModel(), rooms: ROOMS, harness: { engine: 'LangGraph.js', local: true }, busy: Boolean(active || recognitionActive), microphone: recognition.status(), prototype: true });
       }
       if (request.method === 'GET' && url.pathname === '/api/dashboard') {
         return json(response, 200, await buildDashboard());

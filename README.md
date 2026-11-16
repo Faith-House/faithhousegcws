@@ -2,7 +2,7 @@
 
 Jarvis — a local house assistant prototype
 
-Updated November 13, 2026. This prototype provides a central computer dashboard, typed and spoken questions, local “Hey Jarvis” detection, real local Ollama answers, Peter and other local neural spoken replies, orange Jarvis rings, and a Google Calendar setup path. It uses one computer. Models and software are downloaded during setup; microphone processing, AI, speech, and HUD assets run locally afterward.
+Updated November 16, 2026. This prototype provides a central computer dashboard, typed and spoken questions, local “Hey Jarvis” detection, real local Ollama answers, Peter and other local neural spoken replies, orange Jarvis rings, and a Google Calendar setup path. It uses one computer. Models and software are downloaded during setup; microphone processing, AI, speech, and HUD assets run locally afterward.
 
 ## Start
 
@@ -12,6 +12,14 @@ Updated November 13, 2026. This prototype provides a central computer dashboard,
 5. Type a question and press Enter. The input closes, the real answer streams onto the HUD, and Jarvis reads it aloud after the voice is prepared.
 
 This computer's software and models are installed. The desktop shortcut runs OPEN-JARVIS.ps1, which checks the local server identity, starts the installed recovery task when needed, and opens the browser. On a new computer, install Node.js 22 or later, run npm ci in this folder, then run SETUP-VOICE.cmd, SETUP-MICROPHONE.cmd, and SETUP-LISTENING.cmd once with internet access. Ollama and its conversation model are installed separately. Keep the computer awake while Jarvis is in use.
+
+## LangGraph agent harness
+
+LangGraph.js now coordinates central assistant turns and Discord text turns. Its local graph prepares context, routes the request, runs the existing action handlers when appropriate, generates conversation when no action handled the request, and completes the turn. The existing tool planner still validates every batch before execution, enforces its call/round limits, asks for missing details and records real handler results. Streaming answers, supported undo, calendar confirmation and interruption controls continue through the same interfaces. No model was changed or downloaded for this integration.
+
+Room conversation history stays scoped to room/profile; Discord keeps its separate approved-channel context and participation rules. This uses the existing short-lived in-memory stores. Persistent graph checkpoints, long-term memory and automatic replay of interrupted actions are not enabled. Failed actions are not automatically retried by the graph. Earlier completed actions still require an explicit supported undo if the user wants to reverse them. This runtime integration improves coordination; the model still determines reasoning quality.
+
+The local-only `/api/harness` endpoint reports the engine and the latest 20 household runs, including their graph steps and outcomes without question or answer text. `/api/discord` includes the equivalent text-turn report while connected. `/api/status` identifies the active harness. These reports clear on restart. The integration needs no cloud account and does not configure LangSmith tracing or hosted deployment. See [LangGraph graph documentation](https://docs.langchain.com/oss/javascript/langgraph/graph-api).
 
 ## Central dashboard and TV dashboard
 
