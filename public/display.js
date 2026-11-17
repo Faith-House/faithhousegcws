@@ -28,6 +28,7 @@ function render(snapshot) {
   const state = voiceVisual?.state || snapshot.state;
   document.body.dataset.state = state;
   orb.setState(state);
+  orb.setStyle(snapshot.visualStyle || 'rings');
   $('visual').hidden = !dashboard.active && state === 'idle' && !snapshot.calendarPreview && !snapshot.weatherPreview;
   const answer = voiceVisual?.state === 'listening' ? '' : snapshot.state === 'error' ? snapshot.error : snapshot.answer;
   document.body.classList.toggle('has-answer', Boolean(answer));

@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="theme-color" content="#080a0b" />
+    <title>Jarvis · Workbench</title>
+    <link rel="icon" href="/favicon.svg" />
+    <link rel="stylesheet" href="/workbench.css" />
+    <script type="module" src="/workbench.js"></script>
+  </head>
+  <body>
+    <div class="shell">
+      <aside>
+        <a class="brand" href="/"
+          >J<span>ARVIS</span><small>HOUSE OPERATING SYSTEM</small></a
+        >
+        <nav id="navigation" aria-label="Workbench"></nav>
+        <div class="rail-foot">
+          <span class="live-dot"></span> LOCAL FIRST
+          <p>Private workspaces.<br />Visible decisions.</p>
+          <a href="/dashboard">← House dashboard</a>
+        </div>
+      </aside>
+      <main>
+        <header>
+          <div>
+            <p class="eyebrow">CENTRAL COMPUTER / WORKBENCH</p>
+            <h1 id="page-title">Overview</h1>
+          </div>
+          <div class="scope">
+            <label>Housemate<select id="profile"></select></label
+            ><label>Room<select id="room"></select></label>
+          </div>
+        </header>
+        <p id="notice" class="notice" role="status" hidden></p>
+        <div id="content"></div>
+        <section id="result-panel" class="card result" hidden>
+          <div class="card-head">
+            <h2>Action result</h2>
+            <button id="dismiss-result" type="button">Dismiss</button>
+          </div>
+          <p id="result-summary"></p>
+          <pre id="result-detail"></pre>
+          <div id="result-media"></div>
+        </section>
+        <section id="review-panel" class="card" hidden>
+          <div class="card-head">
+            <h2>Code proposal review</h2>
+            <button id="close-review" type="button">Close</button>
+          </div>
+          <p>
+            Review complete files before applying. Static checks do not verify
+            behavior. Applying and running are separate commands.
+          </p>
+          <div id="proposal-files"></div>
+        </section>
+        <footer>
+          JARVIS WORKBENCH <span>YOUR COMPUTER. YOUR CONTROL.</span>
+        </footer>
+      </main>
+    </div>
+  </body>
+</html>

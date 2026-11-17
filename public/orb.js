@@ -14,6 +14,7 @@ export class JarvisOrb {
     this.frame = requestAnimationFrame(this.tick);
   }
   setState(state) { this.state = state; }
+  setStyle(style) { this.style = ['rings','reactor','avatar'].includes(style) ? style : 'rings'; }
   setLevelSource(source) { this.levelSource = source; }
   resize() {
     const bounds = this.canvas.getBoundingClientRect();
@@ -48,6 +49,8 @@ export class JarvisOrb {
     ctx.clearRect(0, 0, 640, 640);
     ctx.globalCompositeOperation = 'source-over'; ctx.shadowBlur = 0;
     this.canvas.dataset.audioLevel = this.level.toFixed(3);
+    this.canvas.dataset.visualStyle = this.style || 'rings';
+    if (this.style === 'reactor' || this.style === 'avatar') { this.drawVariant(ctx); return; }
     const level = this.level, t = this.time;
     const energy = Math.sqrt(level);
     const light = (this.state === 'idle' ? .76 : 1) + energy * .24;
@@ -157,6 +160,34 @@ export class JarvisOrb {
         arc(radius, angle, angle + .018 + level * .024, .85, color(energy * .62, true));
       }
     }
+  }
+  drawVariant(ctx) {
+    const t=this.time, level=this.level, cx=320,cy=320;
+    ctx.lineCap='round';ctx.shadowColor='#ff7a25';
+    const stroke=(points,alpha=1,width=1)=>{ctx.beginPath();points.forEach(([x,y],i)=>i?ctx.lineTo(x,y):ctx.moveTo(x,y));ctx.strokeStyle=`rgba(255,155,69,${alpha})`;ctx.lineWidth=width;ctx.stroke();};
+    const project=(x,y,z)=>{const scale=660/(660+z);return[cx+x*scale,cy+y*scale];};
+    ctx.shadowBlur=8+level*16;
+    for(let ring=0;ring<7;ring++){
+      const r=110+ring*18+level*9,spin=t*(ring%2?-.24:.18)*(1+ring*.2),tilt=.42+ring*.23,points=[];
+      for(let j=0;j<=120;j++){const a=j/120*TAU;const x=Math.cos(a)*r,y=Math.sin(a)*r*Math.cos(tilt),z=Math.sin(a)*r*Math.sin(tilt);points.push(project(x*Math.cos(spin)-y*Math.sin(spin),x*Math.sin(spin)+y*Math.cos(spin),z));}
+      stroke(points,.18+ring*.065,ring%3===0?2:1);
+    }
+    ctx.shadowBlur=0;
+    if(this.style==='avatar'){
+      // Stylized mesh face; mouth opening follows actual audio amplitude, not phonemes.
+      for(let row=0;row<21;row++){
+        const v=-1+row/10,y=v*139,half=Math.sqrt(Math.max(0,1-v*v))*(89+12*Math.cos(v*2));const points=[];
+        for(let col=0;col<=14;col++){const u=-1+col/7,x=u*half,z=-34*Math.sqrt(Math.max(0,1-u*u))*(1-v*v);points.push(project(x,y,z));}stroke(points,.22,.7);
+      }
+      stroke([[246,294],[269,287],[293,294]],.9,2);stroke([[347,294],[371,287],[394,294]],.9,2);
+      stroke([[320,298],[310,341],[330,341]],.6,1);const mouth=3+Math.sqrt(level)*24;
+      stroke([[287,374],[305,370-mouth],[334,370-mouth],[353,374],[334,374+mouth],[305,374+mouth],[287,374]],.95,1.8);
+    }else{
+      const glow=ctx.createRadialGradient(cx,cy,0,cx,cy,83+level*40);glow.addColorStop(0,'rgba(255,223,166,.95)');glow.addColorStop(.1,'rgba(255,145,45,.6)');glow.addColorStop(1,'rgba(255,92,15,0)');ctx.fillStyle=glow;ctx.fillRect(175,175,290,290);
+      for(let i=0;i<36;i++){const a=i/36*TAU+t*.1,r=62+((i*7)%13)+level*30;stroke([[cx+Math.cos(a)*r,cy+Math.sin(a)*r],[cx+Math.cos(a)*(r+8+level*20),cy+Math.sin(a)*(r+8+level*20)]],.8,2);}
+    }
+    for(const pulse of this.pulses){ctx.beginPath();ctx.arc(cx,cy,100+pulse.age*195,0,TAU);ctx.strokeStyle=`rgba(255,162,85,${(1-pulse.age)*pulse.strength*.35})`;ctx.lineWidth=1;ctx.stroke();}
+    ctx.shadowBlur=0;
   }
   destroy() { cancelAnimationFrame(this.frame); this.resizeObserver.disconnect(); }
 }

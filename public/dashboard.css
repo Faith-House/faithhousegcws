@@ -20,6 +20,10 @@ body.dashboard-layout{height:auto;min-height:100vh;overflow:visible;background:r
 .dashboard-nav{display:flex;align-items:center;gap:24px;margin-left:auto}
 .dashboard-nav a{color:#9f9284;text-decoration:none;font-size:12px;white-space:nowrap;transition:color .2s}
 .dashboard-nav a:hover,.text-link:hover{color:#ffd0a0}
+.dashboard-nav .workbench-entry{color:#ffd0a0;border-bottom:1px solid #b97943;padding-bottom:4px}
+.workbench-card{border-color:#644021;background:linear-gradient(145deg,#25180dd9,#100d09ed)}
+.workbench-open{display:inline-block;margin-top:16px;padding:10px 14px;border:1px solid #8b542a;border-radius:7px;background:#412710;color:#ffd5aa;text-decoration:none;font-size:12px}
+.workbench-open:hover{background:#5a3515;color:#ffe8d0}
 .dashboard-nav span{color:#846344;margin-left:3px}
 .overall-status{display:flex;align-items:center;gap:8px;color:#b9b4a5;background:#11120e;border:1px solid #303a27;border-radius:30px;padding:8px 12px;font-size:10px;white-space:nowrap}
 .status-dot{display:inline-block;flex:none;width:6px;height:6px;border-radius:50%;background:#a7b98a;box-shadow:0 0 8px #a7b98a22}

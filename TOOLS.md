@@ -14,6 +14,8 @@ The first two paraphrases were checked with the installed qwen3:0.6b model. Afte
 
 ## Available actions
 
+Workbench adds managed browsing, computer controls, per-profile files and saved facts, background tasks, routines and configured Discord messaging. Its execution setting supports immediate commands or optional review. See [WORKBENCH.md](WORKBENCH.md).
+
 The registry covers screen modes, real time/date, starting/reading/cancelling room timers, creating/reading/clearing room reminders, computer network checks, measured computer health, calendar/demo previews, calendar-event drafts, and discovery of shared devices. Approved Home Assistant controls become available when configured. Door locks, private devices, phone calls, router administration and arbitrary terminal commands are not connected.
 
 ## How requests execute
@@ -31,9 +33,9 @@ Durations are parsed independently of the model. A single explicit duration is u
 
 ## Model and startup
 
-JARVIS_MODEL remains the conversation model. Optionally set JARVIS_TOOL_MODEL in .env.local to a different model already installed in Ollama; otherwise the planner uses JARVIS_MODEL. Changing the setting requires restarting Jarvis. No new model was downloaded or selected automatically.
+JARVIS_MODEL remains the conversation model. Optionally set JARVIS_TOOL_MODEL in .env.local to a different model already installed in Ollama; otherwise the planner uses JARVIS_MODEL. Changing the setting requires restarting Jarvis. This installation now uses qwen3:1.7b for everyday conversation and tool planning following the owner’s requested upgrade. Vision models are selected separately in Workbench.
 
-The current small model is fallible. A larger installed model was also probed but did not finish within the local test timeout under the available memory; it was unloaded after that test. Keep the small model for now and judge additional tasks individually before relying on them for the house.
+The local model remains fallible. Direct website, computer and household handlers avoid model planning for common commands; unfamiliar wording uses the bounded planner. Judge new use cases by actual handler results rather than conversational claims.
 
 Source reference: [Ollama structured outputs](https://docs.ollama.com/capabilities/structured-outputs). The implementation passes a JSON schema to the local chat API and validates tool arguments again before execution.
 

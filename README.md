@@ -2,22 +2,30 @@
 
 Jarvis — a local house assistant prototype
 
-Updated November 16, 2026. This prototype provides a central computer dashboard, typed and spoken questions, local “Hey Jarvis” detection, real local Ollama answers, Peter and other local neural spoken replies, orange Jarvis rings, and a Google Calendar setup path. It uses one computer. Models and software are downloaded during setup; microphone processing, AI, speech, and HUD assets run locally afterward.
+Updated for the Workbench release. This prototype provides a central computer dashboard, typed and spoken questions, local “Hey Jarvis” detection, real local Ollama answers, Peter and other local neural spoken replies, orange Jarvis rings, and a Google Calendar setup path. It uses one computer. Models and software are downloaded during setup; microphone processing, AI, speech, and HUD assets run locally afterward.
+
+## Workbench execution
+
+See [WORKBENCH.md](WORKBENCH.md) for commands, recovery, background work, direct execution, vision and current limits.
+
+Open **Workbench** from the dashboard for managed files, background tasks, routines, computer/browser controls and Discord messages. **Settings → Ask before running commands** selects whether supported commands wait for review or execute immediately. The setting is saved locally and survives restarts. Computer and browser access still have their own enable switches. The Actions page shows actual outcomes in either mode; its recent history clears on restart. Changing to direct execution cancels old pending approvals instead of running them.
+
+Direct execution covers supported computer/browser actions, explicitly requested Discord messages, applying code proposals and running managed JavaScript/Python files. Existing workspace boundaries, application aliases, configured Discord channels, process limits and file-change checks still apply. Code generation produces draft files; applying or running them is a separate command. Running a file uses the Windows account’s permissions. Calendar event confirmations remain part of calendar setup and are separate from Workbench execution settings.
 
 ## Start
 
 1. Double-click **Jarvis** on the Windows desktop. It starts the local server if needed and opens the Control room in a browser.
-2. Keep Ollama running with qwen3:0.6b installed. If the shortcut reports a problem, double-click START.cmd in this folder to see the details.
+2. Keep Ollama running with qwen3:1.7b installed. If the shortcut reports a problem, double-click START.cmd in this folder to see the details.
 3. Choose a room and select Talk to Jarvis, Type a question, or Hey Jarvis. Pressing Enter or clicking the rings also opens the question input.
 5. Type a question and press Enter. The input closes, the real answer streams onto the HUD, and Jarvis reads it aloud after the voice is prepared.
 
-This computer's software and models are installed. The desktop shortcut runs OPEN-JARVIS.ps1, which checks the local server identity, starts the installed recovery task when needed, and opens the browser. On a new computer, install Node.js 22.12 or later (Node.js 24 recommended), run npm ci in this folder, then run SETUP-VOICE.cmd, SETUP-MICROPHONE.cmd, and SETUP-LISTENING.cmd once with internet access. Ollama and its conversation model are installed separately. Keep the computer awake while Jarvis is in use.
+This computer's software and models are installed. The desktop shortcut runs OPEN-JARVIS.ps1, which checks the local server identity, starts the installed recovery task when needed, and opens the browser. On a new computer, install Node.js 22.13 or later (Node.js 24 recommended), run npm ci in this folder, then run SETUP-VOICE.cmd, SETUP-MICROPHONE.cmd, and SETUP-LISTENING.cmd once with internet access. Ollama and its conversation model are installed separately. Keep the computer awake while Jarvis is in use.
 
 ## LangGraph agent harness
 
 LangGraph.js now coordinates central assistant turns and Discord text turns. Its local graph prepares context, routes the request, runs the existing action handlers when appropriate, generates conversation when no action handled the request, and completes the turn. The existing tool planner still validates every batch before execution, enforces its call/round limits, asks for missing details and records real handler results. Streaming answers, supported undo, calendar confirmation and interruption controls continue through the same interfaces. No model was changed or downloaded for this integration.
 
-Room conversation history stays scoped to room/profile; Discord keeps its separate approved-channel context and participation rules. This uses the existing short-lived in-memory stores. Persistent graph checkpoints, long-term memory and automatic replay of interrupted actions are not enabled. Failed actions are not automatically retried by the graph. Earlier completed actions still require an explicit supported undo if the user wants to reverse them. This runtime integration improves coordination; the model still determines reasoning quality.
+Room conversation history stays scoped to room/profile; Discord keeps its separate approved-channel context and participation rules. This uses the existing short-lived in-memory stores. Persistent graph checkpoints and automatic replay of interrupted actions are not enabled. Explicit Workbench profile facts and task checkpoints persist separately from the graph. Failed actions are not automatically retried by the graph. Earlier completed actions still require an explicit supported undo if the user wants to reverse them. This runtime integration improves coordination; the model still determines reasoning quality.
 
 The local-only `/api/harness` endpoint reports the engine and the latest 20 household runs, including their graph steps and outcomes without question or answer text. `/api/discord` includes the equivalent text-turn report while connected. `/api/status` identifies the active harness. These reports clear on restart. The integration needs no cloud account and does not configure LangSmith tracing or hosted deployment. See [LangGraph graph documentation](https://docs.langchain.com/oss/javascript/langgraph/graph-api).
 
@@ -43,7 +51,7 @@ A changed computer LAN address requires updating the receiver address and may re
 
 ## Discord text and voice
 
-Open [Discord setup](http://127.0.0.1:3210/discord) on the central computer. Use your existing bot application and server; follow [DISCORD-SETUP.md](DISCORD-SETUP.md) to save its details locally, link Discord users to roommate profiles and approve voice channels. The bot token stays in ignored `private/discord.json` and is never returned by the setup API or included in GitHub source. Discord requires Node.js 22.12 or later; Node.js 24 is recommended.
+Open [Discord setup](http://127.0.0.1:3210/discord) on the central computer. Use your existing bot application and server; follow [DISCORD-SETUP.md](DISCORD-SETUP.md) to save its details locally, link Discord users to roommate profiles and approve voice channels. The bot token stays in ignored `private/discord.json` and is never returned by the setup API or included in GitHub source. Discord requires Node.js 22.13 or later; Node.js 24 is recommended.
 
 For natural chat, add approved text channel IDs in Discord setup, enable Message Content Intent in Developer Portal / Bot, and allow Read Message History in the channel. Mention Jarvis or say “Hey Jarvis,” then continue normally. He keeps up to 16 recent messages per channel for five minutes, with a 90-second follow-up window per user. The local AI may answer useful open questions, with a 45-second cooldown between unsolicited replies. Banter, bots and unlinked users are ignored. Natural replies are public to the channel; background discussion cannot execute household tools. Clear the text channel list to disable natural chat. See [DISCORD-SETUP.md](DISCORD-SETUP.md) for limits.
 
@@ -92,7 +100,7 @@ The Phone access page shows the current certificate setup address, secure phone 
 
 The phone interface supports typed requests, tap-to-record local transcription, local spoken replies and calendar/weather previews. Speech is transcribed on the central computer; check the transcript and send it. The orange Jarvis rings remain on the phone. Each phone's room/profile comes from pairing, not from fields it can override. It can stop or request audio only for its own latest request. Disconnect a phone on /phones or from the phone itself; sessions expire after 30 days. Central configuration, voice enrollment, model setup and raw profile data are not exposed to the phone gateway.
 
-The certificate-only HTTP setup listener uses port 3214 and the HTTPS phone app uses port 3215 by default, bound to the configured private interface. The central app stays loopback-only. Raw phone tokens and TLS signing/private keys stay under private/ and must not be committed or distributed. No router forwarding, global certificate trust, firewall rule changes, cellular access or background phone wake-word listening were added. Keep the central computer awake. A changed LAN address requires re-running setup to renew the server certificate, restarting Jarvis and possibly pairing at the new address. See [Apple certificate trust](https://support.apple.com/en-us/102390), [Google certificate settings](https://support.google.com/pixelphone/answer/2844832?hl=en) and [browser microphone secure-context requirements](https://developer.mozilla.org/en-US/docs/Web/API/MediaDevices/getUserMedia#privacy_and_security).
+The certificate-only HTTP setup listener uses port 3214 and the HTTPS phone app uses port 3215 by default, bound to the configured private interface. The central app stays loopback-only. Raw phone tokens and TLS signing/private keys stay under private/ and must not be committed or distributed. No router forwarding, global certificate trust, firewall rule changes, cellular access or background phone wake-word listening were added. Keep the central computer awake. On startup, Jarvis can repair a changed LAN address and renew its server certificate using the existing CA when a single suitable private Wi-Fi address is clear. Ambiguous addresses or a missing CA still need setup. A browser may need pairing again at the new address. See [Apple certificate trust](https://support.apple.com/en-us/102390), [Google certificate settings](https://support.google.com/pixelphone/answer/2844832?hl=en) and [browser microphone secure-context requirements](https://developer.mozilla.org/en-US/docs/Web/API/MediaDevices/getUserMedia#privacy_and_security).
 
 ## Daily weather display
 
@@ -100,13 +108,13 @@ Daily weather reports for current conditions, today, tomorrow or a named day now
 
 ## Normal mode and coding mode
 
-Jarvis now has a separate, configurable local model slot for coding. Open **AI models** in the question panel, or visit http://127.0.0.1:3210/models. Install the chosen model in Ollama on the target computer, refresh the page, and save it as the coding model. The everyday model stays JARVIS_MODEL (currently qwen3:0.6b). A coding model has not been selected or downloaded automatically: the future Beelink's exact RAM/GPU specifications are still needed to choose the final model. Installing a larger model here does not prove it will run well on this current 8 GB computer.
+Jarvis now has a separate, configurable local model slot for coding. Open **AI models** in the question panel, or visit http://127.0.0.1:3210/models. Install the chosen model in Ollama on the target computer, refresh the page, and save it as the coding model. The everyday model stays JARVIS_MODEL (currently qwen3:1.7b). A coding model has not been selected or downloaded automatically: the future Beelink's exact RAM/GPU specifications are still needed to choose the final model. Installing a larger model here does not prove it will run well on this current 8 GB computer.
 
 Say “coding mode,” “switch to developer mode,” or “normal mode.” A switch checks that the second model is installed locally; a missing model leaves the current mode unchanged and explains the setup needed. Each room/profile has its own mode. Mode resets to normal on New conversation or server restart; the configured coding model persists locally in private/model-routing.json. Cloud-model tags and known remote-backed entries are not offered.
 
 Coding answers use the second model, an 8,192-token context and up to 2,048 output tokens by default, a longer timeout, longer pasted inputs and a readable monospace answer layout. Set JARVIS_CODING_CONTEXT and JARVIS_CODING_OUTPUT before startup to tune the limits for the target computer. The input limit is bounded by the configured context. Short-lived conversation history is reused with a bounded budget. Switching does not preload the weights; the next coding answer may take longer while Ollama loads them. Normal answers and household tool planning retain the fast model.
 
-Coding mode can write, explain, review and debug supplied code. It has no repository editor or terminal connected and does not claim to have changed files or run tests. Pasted code is kept out of household action routing; explicit short household commands still use existing tools. Use the existing spoken-reply controls if you prefer code answers silently on screen. See [Ollama chat API](https://docs.ollama.com/api/chat) for local model selection and runtime options.
+Coding mode can write, explain, review and debug supplied code. Workbench additionally supports managed file editing, code proposals, static checks and bounded program execution through actual tools; a conversational code answer alone does not change files or run tests. Pasted code is kept out of household action routing; explicit short household commands still use existing tools. Use the existing spoken-reply controls if you prefer code answers silently on screen. See [Ollama chat API](https://docs.ollama.com/api/chat) for local model selection and runtime options.
 
 ## Follow-ups, multiple actions, clarification and undo
 
@@ -180,7 +188,7 @@ The control page listens only on this computer's loopback address. A separate re
 - Local neural spoken replies, voice selection, mute, stop, replay, and a speaking animation state.
 - Streamed answers, separate room histories, cancellation, reconnection, and short-lived response display.
 - Visible errors if Ollama/model generation fails.
-- Explicit unavailable-connection messages for common unconnected devices, calendars, calls, router monitoring and live weather. These avoid asking the tiny model to invent service results.
+- Explicit unavailable-connection messages for common unconnected devices, calendars, calls and router monitoring. These avoid asking the tiny model to invent service results.
 - One AI answer at a time to keep this initial laptop prototype light.
 
 ## What comes later
@@ -191,7 +199,7 @@ Room microphone units, automatic TV wake/app switching, Home Assistant devices, 
 
 The server uses built-in Node.js features and requires Node 22 or later. Defaults:
 
-- JARVIS_MODEL: qwen3:0.6b
+- JARVIS_MODEL: qwen3:1.7b
 - JARVIS_PORT: 3210
 - JARVIS_OLLAMA_URL: http://127.0.0.1:11434 (a local HTTP endpoint only)
 - JARVIS_SPEECH_VOICE: bm_george unless another installed neural preset is selected
@@ -262,7 +270,7 @@ The get_weather tool is read-only, appears in Tool activity, and is checked by C
 
 ## Windows startup and recovery
 
-INSTALL-STARTUP.ps1 installs a task for this Windows user at sign-in, with limited privileges and no stored password. RUN-JARVIS.ps1 runs the supervisor. Task Scheduler restarts a failed supervisor after one minute. A loopback single-instance slot prevents duplicate supervisors, and the task ignores duplicate launches. This is user sign-in startup, not a service that starts before login. No automatic login, firewall, power plan or execution-policy changes are made.
+INSTALL-STARTUP.ps1 installs a task for this Windows user at sign-in, with limited privileges and no stored password. RUN-JARVIS.ps1 runs the supervisor. Task Scheduler restarts a failed supervisor after one minute. A loopback single-instance slot prevents duplicate supervisors, and the task ignores duplicate launches. This is user sign-in startup, not a service that starts before login. The startup installer does not change automatic login, firewall, power plan or execution policy. Closed-lid settings on this laptop were changed separately at the owner’s explicit request; see WORKBENCH.md.
 
 The Node supervisor checks a lightweight /api/health endpoint, independent of Ollama inference. It restarts its own crashed server with bounded backoff. After the startup grace period, three failed checks trigger a restart of its owned server process tree. It never kills an unverified or externally launched process. A conflicting application on the port produces a warning rather than being stopped. Existing Ollama instances are left alone; if Ollama is absent and its configured executable is available, the supervisor requests ollama serve. It does not download models or kill an unresponsive external Ollama instance.
 

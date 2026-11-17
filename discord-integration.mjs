@@ -15,7 +15,7 @@ export function createDiscordIntegration({directory,profiles,rooms,bridge,loadSd
   if(command==='last'){const item=last.get(message.author.id);return item&&now()-item.at<300000?item.answer:'There is no recent tool reply for your Discord account.';}
   throw Object.assign(Error('That Discord control is unavailable.'),{status:400});
  }
- async function status(){const config=await store.status();const effectiveState=connectionState==='connected'&&client?.isReady&&!client.isReady()?'reconnecting':connectionState;const invite=config.applicationId&&config.guildId?'https://discord.com/oauth2/authorize?'+new URLSearchParams({client_id:config.applicationId,scope:'bot applications.commands',permissions:config.textChannelIds.length?'3247104':'3181568',guild_id:config.guildId,disable_guild_select:'true'}):null;return{...config,state:effectiveState,connected:effectiveState==='connected',detail,error:lastError,botName:client?.user?.tag||null,voice:voiceState,text:text?.status()||null,inviteUrl:invite};}
+ async function status(){const config=await store.status();const effectiveState=connectionState==='connected'&&client?.isReady&&!client.isReady()?'reconnecting':connectionState;const invite=config.applicationId&&config.guildId?'https://discord.com/oauth2/authorize?'+new URLSearchParams({client_id:config.applicationId,scope:'bot applications.commands',permissions:config.textChannelIds.length?'3247104':'3181568',guild_id:config.guildId,disable_guild_select:'true'}):null;return{...config,state:effectiveState,connected:effectiveState==='connected',detail,error:lastError,botName:client?.user?.tag||null,voice:voiceState,text:text?.status()||null,textChannels:config.textChannelIds.map(id=>({id,name:client?.channels?.cache?.get(id)?.name||null})),inviteUrl:invite};}
  async function handle(interaction){
   if(!interaction.isChatInputCommand()||interaction.commandName!=='jarvis')return;
   const config=await store.status(),binding=config.members.find(m=>m.userId===interaction.user.id);
@@ -64,7 +64,16 @@ export function createDiscordIntegration({directory,profiles,rooms,bridge,loadSd
   })().finally(()=>{connecting=null;});return connecting;
  }
  async function configure(input){await store.configure(input);await disconnect({rememberDisabled:false});lastError='';return status();}
+ async function sendApproved({profileId,channelId,message}){
+  const config=await store.status();
+  if(connectionState!=='connected'||!client||!config.members.some(m=>m.profileId===profileId)||!config.textChannelIds.includes(channelId))throw Object.assign(Error('Connect Discord and choose an approved channel linked to this profile.'),{status:409});
+  if(typeof message!=='string'||!message.trim()||message.length>1800)throw Object.assign(Error('Enter a message under 1,800 characters.'),{status:400});
+  const channel=await client.channels.fetch(channelId);
+  if(channel?.guildId!==config.guildId||typeof channel.send!=='function')throw Object.assign(Error('That approved channel is unavailable.'),{status:409});
+  const sent=await channel.send({content:message,allowedMentions:{parse:[],repliedUser:false}});
+  return{ok:true,outcome:'confirmed',summary:'Discord accepted the message in the selected channel. Read receipt is unavailable.',messageId:sent.id,channelId};
+ }
  async function start(){const config=await store.status();if(config.enabled)await connect();}
  async function close(){await disconnect({rememberDisabled:false});bridge.close();await connecting;await store.close();}
- return{status,configure,connect,disconnect:()=>disconnect(),start,close,handle};
+ return{status,configure,connect,disconnect:()=>disconnect(),start,close,handle,sendApproved};
 }

@@ -67,6 +67,10 @@ test('phone TLS signs the server for its LAN address and supports a verified HTT
  await new Promise(r=>server.listen(0,'127.0.0.1',r));
  try{const text=await new Promise((resolve,reject)=>{https.get({hostname:'127.0.0.1',port:server.address().port,ca:ca.toString()},response=>{let text='';response.on('data',c=>{text+=c;});response.on('end',()=>resolve(text));}).on('error',reject);});assert.equal(text,'secure phone transport');}finally{await new Promise(r=>server.close(r));}
  await assert.rejects(preparePhoneTls({directory:dir,address:'8.8.8.8',openssl}));
+ const renewed=await preparePhoneTls({directory:dir,address:'192.168.1.21',openssl});
+ assert.equal(renewed.caFingerprint,first.caFingerprint);
+ const nextLeaf=new X509Certificate(await readFile(path.join(dir,'server.pem')));
+ assert.equal(nextLeaf.checkIP('192.168.1.21'),'192.168.1.21');assert.equal(nextLeaf.verify(ca.publicKey),true);
 });
 
 test('central phone settings stay on localhost, do not grant a phone pairing while disabled, and serve setup resources',async()=>{

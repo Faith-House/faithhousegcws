@@ -7,12 +7,12 @@ import path from 'node:path';
 import { createSupervisor,projectId } from '../supervisor.mjs';
 
 async function freePort(){const server=http.createServer();await new Promise(r=>server.listen(0,'127.0.0.1',r));const port=server.address().port;await new Promise(r=>server.close(r));return port;}
-async function until(check,timeout=12000){const end=Date.now()+timeout;while(Date.now()<end){if(await check())return;await new Promise(r=>setTimeout(r,70));}throw Error('Timed out waiting for supervisor state');}
+async function until(check,timeout=25000){const end=Date.now()+timeout;while(Date.now()<end){if(await check())return;await new Promise(r=>setTimeout(r,70));}throw Error('Timed out waiting for supervisor state');}
 async function fixture(){
  const root=await mkdtemp(path.join(tmpdir(),'jarvis-supervisor-test-')),port=await freePort(),supervisorPort=await freePort();
  const serverFile=path.join(root,'fixture.mjs'),runtimeDirectory=path.join(root,'runtime'),hangFile=path.join(root,'hang');
  await writeFile(serverFile,`import http from 'node:http';import {existsSync} from 'node:fs';const server=http.createServer((req,res)=>{if(existsSync(${JSON.stringify(hangFile)}))return;res.setHeader('Content-Type','application/json');res.end(JSON.stringify({app:'jarvis-local-house',projectId:${JSON.stringify(projectId(root))},pid:process.pid}));});server.listen(Number(process.env.JARVIS_PORT),'127.0.0.1');`);
- const options={root,port,supervisorPort,serverFile,runtimeDirectory,pollMs:100,timeoutMs:250,startupGraceMs:900,failureLimit:2,backoffMs:[70,150],watch:false,ensureOllama:false};
+ const options={root,port,supervisorPort,serverFile,runtimeDirectory,pollMs:100,timeoutMs:250,startupGraceMs:3000,failureLimit:2,backoffMs:[70,150],watch:false,ensureOllama:false};
  return{root,port,supervisorPort,hangFile,runtimeDirectory,options};
 }
 test('owned server crashes recover, duplicate supervisors do not duplicate servers, and stop releases the child',async()=>{

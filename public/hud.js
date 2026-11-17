@@ -167,6 +167,10 @@ async function post(path, body) {
 }
 
 function updateVisuals() {
+  const workbenchUrl = new URL('/workbench',location.origin);
+  workbenchUrl.searchParams.set('room',room);
+  if(selectedProfileId)workbenchUrl.searchParams.set('profileId',selectedProfileId);
+  for(const link of document.querySelectorAll('[data-workbench-link]'))link.href=workbenchUrl.pathname+workbenchUrl.search;
   const snapshot = lastSnapshot;
   const speaking = speech.state === 'playing';
   const speechActive = ['playing', 'preparing'].includes(speech.state);
@@ -174,6 +178,7 @@ function updateVisuals() {
   const visualState = micActive ? (microphone.state === 'transcribing' ? 'thinking' : 'listening') : speaking ? 'speaking' : snapshot.state;
   document.body.dataset.state = visualState;
   orb.setState(visualState);
+  orb.setStyle(snapshot.visualStyle || 'rings');
   busy = ['thinking', 'answering'].includes(snapshot.state);
   $('send').disabled = busy || submitting || micActive;
   $('microphone').disabled = !microphoneAvailable || busy || submitting || ['requesting', 'transcribing'].includes(microphone.state);

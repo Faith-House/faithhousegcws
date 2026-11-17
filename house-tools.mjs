@@ -8,7 +8,7 @@ const choice = values => ({ type: 'string', enum: values });
 const params = (properties = {}, required = []) => ({ type: 'object', properties, required, additionalProperties: false });
 const ok = (summary, data, patch) => ({ ok: true, summary, ...(data ? { data } : {}), ...(patch ? { patch } : {}) });
 
-export function createHouseTools({ actions, reminders, calendar, homeAssistant, systemHealth, webSearch, diagnostics, chores, weather, draftCalendarEvent = () => {} } = {}) {
+export function createHouseTools({ actions, reminders, calendar, homeAssistant, systemHealth, webSearch, diagnostics, chores, weather, extraTools = async () => [], draftCalendarEvent = () => {} } = {}) {
   return async context => {
     const local = async question => {
       const result = await actions.handle({ room: context.room, question });
@@ -84,6 +84,6 @@ export function createHouseTools({ actions, reminders, calendar, homeAssistant, 
       },
     });
     const reads = new Set(['get_time', 'get_date', 'list_timers', 'list_reminders', 'check_network', 'get_system_status', 'list_devices', 'search_web', 'diagnose_connections', 'list_chores', 'get_weather']);
-    return tools.map(tool => ({ ...tool, readOnly: reads.has(tool.name) }));
+    return [...tools.map(tool => ({ ...tool, readOnly: reads.has(tool.name) })), ...await extraTools(context)];
   };
 }

@@ -1,4 +1,8 @@
 import { createAgentHarness } from './agent-harness.mjs';
+import { createWorkbench } from './workbench.mjs';
+import { isBrowserRequest } from './browser-intents.mjs';
+import { computerIntent } from './computer-intents.mjs';
+import { recoverLanBindings } from './lan-recovery.mjs';
 import { createDiscordTextModel } from './discord-text.mjs';
 import { createDiscordIntegration } from './discord-integration.mjs';
 import { createDiscordBridge } from './discord-bridge.mjs';
@@ -41,6 +45,9 @@ import { createWebSearch, isSearchRequest } from './web-search.mjs';
 export const ROOMS = ['bedroom-1', 'bedroom-2', 'bedroom-3', 'bedroom-4', 'living-room'];
 const publicRoot = new URL('./public/', import.meta.url);
 const assets = new Map([
+  ['/workbench', ['workbench.html', 'text/html; charset=utf-8']],
+  ['/workbench.js', ['workbench.js', 'text/javascript; charset=utf-8']],
+  ['/workbench.css', ['workbench.css', 'text/css; charset=utf-8']],
   ['/discord', ['discord.html', 'text/html; charset=utf-8']],
   ['/discord.js', ['discord.js', 'text/javascript; charset=utf-8']],
   ['/discord.css', ['discord.css', 'text/css; charset=utf-8']],
@@ -92,7 +99,7 @@ const assets = new Map([
   ['/timer-chime.wav', ['timer-chime.wav', 'audio/wav']],
   ['/favicon.svg', ['favicon.svg', 'image/svg+xml']],
 ]);
-const systemPrompt = 'You are Jarvis, the local household assistant. Your name is Jarvis; profile names belong to the people you assist, never to you. Answer the current question directly. Use earlier conversation only when relevant and keep follow-ups consistent. Do not repeat an earlier greeting or answer when the topic changes. Speak naturally in one to three short sentences of plain text, without Markdown or emoji unless requested. For a casual preference question, you may make a conversational choice without claiming human feelings. Use supplied speaker matches and profile preferences; never invent recognition or personal information. Public internet search is available through the search_web tool, with snippet-based local summaries and visible sources. Only claim a web lookup when real search results were supplied. Devices, router monitoring, phone calls and dedicated live data feeds are not connected. Never pretend to carry out an unavailable action.';
+const systemPrompt = 'You are Jarvis, the local household assistant. Your name is Jarvis; profile names belong to the people you assist, never to you. Answer the current question directly. Use earlier conversation only when relevant and keep follow-ups consistent. Do not repeat an earlier greeting or answer when the topic changes. Speak naturally in one to three short sentences of plain text, without Markdown or emoji unless requested. For a casual preference question, you may make a conversational choice without claiming human feelings. Use supplied speaker matches and profile preferences; never invent recognition or personal information. Public internet search is available through the search_web tool, with snippet-based local summaries and visible sources. Only claim a web lookup when real search results were supplied. The Workbench supports explicitly saved profile facts, managed files, background research and code proposals, routines, Windows/browser controls, and Discord messages. Workbench commands execute directly when its approval setting is off. Only claim execution from real tool results; pending review is not execution. Local vision requires a selected installed vision model. Weather is connected. Device controls depend on Home Assistant setup; router monitoring and telephone calls are not connected. Never pretend to carry out an unavailable action.';
 
 function json(response, status, body) {
   response.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
@@ -148,7 +155,7 @@ function unavailableConnection(question) {
   return null;
 }
 
-export function createJarvisServer({ model = process.env.JARVIS_MODEL || 'qwen3:0.6b', ollamaUrl = process.env.JARVIS_OLLAMA_URL || 'http://127.0.0.1:11434', requestTimeoutMs = 60000, speech = createLocalSpeech(), recognition = createLocalRecognition(), actionsOptions = {}, homeAssistant = createHomeAssistant(), displayBind = process.env.JARVIS_DISPLAY_BIND || '', pairingOptions = {}, wakeword = createWakeWordService(), profiles = createProfiles({ directory: actionsOptions.dataDirectory }), speakerId = createSpeakerIdentification(), webSearch = createWebSearch({ model, ollamaUrl }), diagnosticsOptions = {}, weatherOptions = {}, codingModel = process.env.JARVIS_CODING_MODEL || '', codingContext = process.env.JARVIS_CODING_CONTEXT || 8192, codingOutput = process.env.JARVIS_CODING_OUTPUT || 2048, codingTimeoutMs = 180000, tvLaunchOptions = {}, phoneBind = process.env.JARVIS_PHONE_BIND || '', phonePort = Number(process.env.JARVIS_PHONE_PORT || 3215), phoneSetupPort = Number(process.env.JARVIS_PHONE_SETUP_PORT || 3214), discordOptions = {} } = {}) {
+export function createJarvisServer({ model = process.env.JARVIS_MODEL || 'qwen3:1.7b', ollamaUrl = process.env.JARVIS_OLLAMA_URL || 'http://127.0.0.1:11434', requestTimeoutMs = 60000, speech = createLocalSpeech(), recognition = createLocalRecognition(), actionsOptions = {}, homeAssistant = createHomeAssistant(), displayBind = process.env.JARVIS_DISPLAY_BIND || '', pairingOptions = {}, wakeword = createWakeWordService(), profiles = createProfiles({ directory: actionsOptions.dataDirectory }), speakerId = createSpeakerIdentification(), webSearch = createWebSearch({ model, ollamaUrl }), diagnosticsOptions = {}, weatherOptions = {}, codingModel = process.env.JARVIS_CODING_MODEL || '', codingContext = process.env.JARVIS_CODING_CONTEXT || 8192, codingOutput = process.env.JARVIS_CODING_OUTPUT || 2048, codingTimeoutMs = 180000, tvLaunchOptions = {}, phoneBind = process.env.JARVIS_PHONE_BIND || '', phonePort = Number(process.env.JARVIS_PHONE_PORT || 3215), phoneSetupPort = Number(process.env.JARVIS_PHONE_SETUP_PORT || 3214), discordOptions = {}, workbenchOptions = {} } = {}) {
   const state = new Map(ROOMS.map(room => [room, initialState()]));
   const conversation = createConversation();
   const harness = createAgentHarness();
@@ -201,7 +208,16 @@ export function createJarvisServer({ model = process.env.JARVIS_MODEL || 'qwen3:
   const commandInterpreter = createCommandInterpreter({ model, base });
   const diagnostics = createDiagnostics({ ...diagnosticsOptions, checks: diagnosticsOptions.checks || connectionChecks({ checkModel, speech, recognition, wakeword, speakerId, homeAssistant, calendar, pairing, webSearch, weather, network: actions.network, displayStatus: () => ({ enabled: Boolean(displayServer?.server.listening), connectedIds: displayServer?.connectedIds() || [] }) }) });
   const activity = createToolActivity();
-  const toolAgent = createToolAgent({ onActivity: activity.event, onResult: undoHistory.record, model: process.env.JARVIS_TOOL_MODEL || model, base, tools: createHouseTools({ actions, reminders, calendar, homeAssistant, systemHealth, webSearch, diagnostics, chores, weather, draftCalendarEvent: (room, event) => calendarDrafts.set(room, { ...event, expiresAt: Date.now() + 120000 }) }) });
+  let visualStyle = 'rings';
+  const routineBridge = createDiscordBridge({baseUrl:()=>`http://127.0.0.1:${server.address().port}/`,timeoutMs:90000});
+  const workbench = createWorkbench({ directory: actionsOptions.dataDirectory || `${APP_ROOT}/private`, profiles, rooms: ROOMS, base, model, webSearch, systemHealth,
+    notify: item => { if (!ROOMS.includes(item.room)) return; const message = String(item.title).slice(0,600); update(item.room,{notification:{id:randomUUID(),kind:'workbench',createdAt:Date.now(),message}}); },
+    sendDiscord: input => discord.sendApproved(input), discordStatus: () => discord.status(),
+    runCommand: routine => routineBridge.ask('routine:'+routine.id,routine,routine.instruction),
+    briefing: async routine => { const results=await Promise.allSettled([weather.answer('today’s weather'),calendar.preview({range:'day',date:new Intl.DateTimeFormat('en-CA',{timeZone:routine.timeZone}).format(new Date())})]);return results.map((r,i)=>r.status==='fulfilled'?(r.value.summary||r.value.answer||(i?'Calendar is ready in its panel.':'Weather is ready in its panel.')):(i?'Calendar could not be read.':'Weather could not be read.')).join(' '); },
+    onActivity:activity.event, styleChanged: style => { visualStyle=style;for(const room of ROOMS){state.set(room,{...state.get(room),visualStyle:style});publish(room);} }, ...workbenchOptions
+  });
+  const toolAgent = createToolAgent({ onActivity: activity.event, onResult: undoHistory.record, model: process.env.JARVIS_TOOL_MODEL || model, base, tools: createHouseTools({ actions, reminders, calendar, homeAssistant, systemHealth, webSearch, diagnostics, chores, weather, extraTools: workbench.tools, draftCalendarEvent: (room, event) => calendarDrafts.set(room, { ...event, expiresAt: Date.now() + 120000 }) }) });
   const tvLaunch = createTvAutolaunch({ directory: actionsOptions.dataDirectory || `${APP_ROOT}/private`, pairing,
     receiver: () => ({ enabled: Boolean(displayServer?.server.listening), url: displayServer?.server.listening ? `http://${displayBind}:${displayServer.server.address().port}/` : null }),
     visible: id => displayServer?.isVisible(id) || false,
@@ -238,7 +254,7 @@ export function createJarvisServer({ model = process.env.JARVIS_MODEL || 'qwen3:
     try { caFingerprint = new X509Certificate(await readFile(`${phoneDirectory}/tls/ca.pem`)).fingerprint256; } catch {}
     return { ...await phonePairing.list(), enabled: Boolean(phoneAccess?.server.listening && phoneAccess?.bootstrap.listening), url: phoneAccess?.server.listening ? phoneAccess.url : null, setupUrl: phoneAccess?.bootstrap.listening ? phoneAccess.setupUrl : null, caFingerprint, error: phoneError, configured: Boolean(phoneBind) };
   }
-  const discord = createDiscordIntegration({ directory: actionsOptions.dataDirectory || `${APP_ROOT}/private`, profiles, rooms: ROOMS, textDecide: createDiscordTextModel({model,ollamaUrl}),
+  const discord = createDiscordIntegration({ directory: actionsOptions.dataDirectory || `${APP_ROOT}/private`, profiles, rooms: ROOMS, textDecide: createDiscordTextModel({model,ollamaUrl,memoryContext:workbench.memoryContext}),
     bridge: createDiscordBridge({ baseUrl: () => `http://127.0.0.1:${server.address().port}/` }), ...discordOptions });
   const toolContext = (room, profileId, question = '', view = 'minimal', signal) => ({ room, profileId: profileId || null, question, view, signal, timeZone: process.env.JARVIS_TIMEZONE || 'America/Chicago' });
 
@@ -290,6 +306,7 @@ export function createJarvisServer({ model = process.env.JARVIS_MODEL || 'qwen3:
   }
 
   function publish(room) {
+    state.set(room,{...state.get(room),visualStyle});
     const message = `data: ${JSON.stringify(state.get(room))}\n\n`;
     for (const client of clients.get(room)) {
       if (!client.destroyed) client.write(message);
@@ -383,6 +400,12 @@ export function createJarvisServer({ model = process.env.JARVIS_MODEL || 'qwen3:
     try {
       void bringUpTv(room, requestId, controller.signal).catch(() => {});
       const runActions = async () => {
+      const extended = await workbench.handle(originalQuestion,context);
+      if(extended){if(extended.result&&!extended.readOnly)undoHistory.record(context,{...extended.result,undoUnsupported:!extended.result.undo});respond({state:'ready',answer:extended.answer,resultKind:'workbench',toolOutcome:extended.result?.outcome||null});return;}
+      if(isBrowserRequest(originalQuestion)||/\b(?:workspace|code proposal|code draft|coding task|managed browser|computer volume|laptop volume|computer brightness|routines?|every morning|every day|every evening|daily briefing|background task|saved memor|remember|research|investigate)\b/i.test(originalQuestion)){
+        if(acceptTools(await toolAgent.run(context)))return;
+        if(isBrowserRequest(originalQuestion)){respond({state:'ready',answer:'I could not execute that browser request. No browser action was confirmed. Please give the website address or split the steps.',resultKind:'workbench'});return;}
+      }
       const modeIntent = modelModeIntent(originalQuestion);
       if (modeIntent) {
         const result = await tracked('set_model_mode', () => modelRouter.switchMode(scope, modeIntent));
@@ -432,7 +455,7 @@ export function createJarvisServer({ model = process.env.JARVIS_MODEL || 'qwen3:
       }
       if (/\b(?:what (?:tools|actions) (?:can|do) you|what can you (?:do|control)|(?:your|available) capabilities)\b/i.test(question)) {
         const home = await homeAssistant.status();
-        respond({ state: 'ready', resultKind: 'tool-agent', answer: 'I can switch screen views, run room timers and reminders, manage shared household chores, read current weather and forecasts, show calendar previews, and check this computer and its network. I can search the internet for public information with source links, combine tasks, and ask for missing details. ' + (home.configured && home.exposedDevices.length ? 'I can also control the approved shared Home Assistant devices.' : 'Shared device controls need Home Assistant connected first.') }); return;
+        respond({ state: 'ready', resultKind: 'tool-agent', answer: 'I can switch screen views, run room timers and reminders, manage shared household chores, read current weather and forecasts, show calendar previews, and check this computer and its network. I can search public information with sources, combine tasks and ask for missing details. Workbench also provides managed browsing, computer controls, files, background research and code proposals, saved facts, routines and configured Discord messaging. ' + (home.configured && home.exposedDevices.length ? 'I can also control the approved shared Home Assistant devices.' : 'Shared device controls need Home Assistant connected first.') }); return;
       }
       const directView = !useAgentFirst && directViewIntent(question, context.view);
       if (directView) {
@@ -528,7 +551,7 @@ export function createJarvisServer({ model = process.env.JARVIS_MODEL || 'qwen3:
       };
       const runConversation = async () => {
       const messages = route.mode === 'coding' ? codingMessages(turn.messages, question, route.contextTokens, route.outputTokens) : turn.messages.map(message => ({ ...message, content: message.content.slice(0, 700) }));
-      const preference = speakerPrompt({ profile, speaker, household: await profiles.list() });
+      const preference = speakerPrompt({ profile, speaker, household: await profiles.list() }) + await workbench.memoryContext(profile?.id,question);
       const upstream = await fetch(new URL('/api/chat', base), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -584,7 +607,7 @@ export function createJarvisServer({ model = process.env.JARVIS_MODEL || 'qwen3:
           context = { ...toolContext(room, profile?.id, question, viewContext || state.get(room).view, controller.signal), requestId, messages: turn.messages };
           compound = isCompoundToolRequest(question) && (isCommandCandidate(question) || isWeatherRequest(question) || /\b(?:chores?|housework|remind(?:er|ers)?|computer|laptop|system|cpu|diagnostics?)\b/i.test(question));
           useAgentFirst = compound || toolAgent.hasPending(context);
-          householdCommand = isUndoRequest(question) || (!/[`{}]/.test(question) && question.length <= 600 && (isWeatherRequest(question) || /^(?:(?:hey )?jarvis[, ]*)?(?:please )?(?:(?:can|could|would) you )?(?:show|open|close|hide|switch|go|set|start|stop|cancel|remind|list|mark|assign|add|turn|check)\b.*\b(?:dashboard|quiet|rings|timer|countdown|reminder|calendar|chores?|lights?|lamps?|network|connections)\b/i.test(question)));
+          householdCommand = Boolean(computerIntent(question)) || isBrowserRequest(question) || isUndoRequest(question) || (!/[`{}]/.test(question) && question.length <= 600 && (isWeatherRequest(question) || /^(?:(?:hey )?jarvis[, ]*)?(?:please )?(?:(?:can|could|would) you )?(?:show|open|close|hide|switch|go|set|start|stop|cancel|remind|list|mark|assign|add|turn|check)\b.*\b(?:dashboard|quiet|rings|timer|countdown|reminder|calendar|chores?|lights?|lamps?|network|connections)\b/i.test(question)));
         },
         route: () => {
           return modelModeIntent(originalQuestion) || route.mode !== 'coding' || householdCommand ? 'actions' : 'conversation';
@@ -624,6 +647,22 @@ export function createJarvisServer({ model = process.env.JARVIS_MODEL || 'qwen3:
       const origin = request.headers.origin;
       if (origin && origin !== host.origin) return json(response, 403, { error: 'Please use the Jarvis page on this computer.' });
       const url = new URL(request.url, host.origin);
+      if(url.pathname==='/workbench')response.setHeader('Permissions-Policy','camera=(self), geolocation=(), microphone=(self)');
+      if(request.method==='GET'&&url.pathname==='/api/workbench')return json(response,200,await workbench.status(url.searchParams.get('profileId')));
+      if(request.method==='GET'&&url.pathname==='/api/workbench/models')return json(response,200,{models:await workbench.installedVision()});
+      if(request.method==='GET'&&url.pathname==='/api/workbench/file'){
+        const profileId=url.searchParams.get('profileId'),file=url.searchParams.get('file');if(!await profiles.get(profileId))return json(response,400,{error:'Choose a current roommate profile.'});
+        const data=await workbench.workspace.bytes(profileId,file),ext=file.split('.').pop().toLowerCase();
+        const types={jpg:'image/jpeg',jpeg:'image/jpeg',png:'image/png',webp:'image/webp',mp4:'video/mp4',webm:'video/webm',mp3:'audio/mpeg',wav:'audio/wav',ogg:'audio/ogg'};
+        const inline=url.searchParams.get('preview')==='1'&&types[ext];response.writeHead(200,{'Content-Type':inline||'application/octet-stream','Content-Disposition':(inline?'inline':'attachment')+'; filename="'+file.split('/').pop().replace(/[^a-zA-Z0-9._-]/g,'_')+'"','Cache-Control':'no-store'});return response.end(data);
+      }
+      if(request.method==='POST'&&url.pathname==='/api/workbench/action'){
+        const controller=new AbortController();
+        const onClose=()=>{if(!response.writableEnded)controller.abort(Error('Request closed'));};response.once('close',onClose);
+        try{const body=await readJson(request,18*1024*1024);return json(response,200,await workbench.dispatch({...body,signal:controller.signal}));}finally{response.off('close',onClose);}
+      }
+      if(request.method==='POST'&&url.pathname==='/api/workbench/settings')return json(response,200,await workbench.settings(await readJson(request)));
+      if(request.method==='POST'&&url.pathname==='/api/workbench/approve'){const body=await readJson(request);return json(response,200,await workbench.approvals.resolve(body.id,body.allow));}
       if (request.method === 'GET' && assets.has(url.pathname)) {
         const [filename, mime] = assets.get(url.pathname);
         const file = await readFile(new URL(filename, publicRoot));
@@ -688,7 +727,7 @@ export function createJarvisServer({ model = process.env.JARVIS_MODEL || 'qwen3:
       if (request.method === 'GET' && url.pathname === '/api/activity') { const room = requireRoom(url.searchParams.get('room')); return json(response, 200, { room, checkedAt: Date.now(), entries: activity.list(room) }); }
       if (request.method === 'GET' && url.pathname === '/api/tools') {
         const room = requireRoom(url.searchParams.get('room') || 'bedroom-1');
-        return json(response, 200, { model: process.env.JARVIS_TOOL_MODEL || model, tools: await toolAgent.catalog(toolContext(room)), activity: toolAgent.activity(room) });
+        return json(response, 200, { model: process.env.JARVIS_TOOL_MODEL || model, tools: await toolAgent.catalog(toolContext(room, (await profiles.get(url.searchParams.get('profileId')))?.id)), activity: toolAgent.activity(room) });
       }
       if (request.method === 'GET' && url.pathname === '/api/reminders') return json(response, 200, await reminders.list(requireRoom(url.searchParams.get('room'))));
       if (request.method === 'POST' && url.pathname === '/api/reminders') {
@@ -960,6 +999,7 @@ export function createJarvisServer({ model = process.env.JARVIS_MODEL || 'qwen3:
         clearTimeout(expiryTimers.get(room));
         expiryTimers.delete(room);
         active = { room, requestId, controller };
+        workbench.interact();
         state.set(room, { ...initialState(state.get(room).view, state.get(room).calendarPreview, state.get(room).calendarDraft), state: 'thinking', requestId, profileId: profile?.id || null, modelMode: selectedRoute.mode, modelName: selectedRoute.model, maxInputChars: selectedRoute.maxInputChars, notification: state.get(room).notification });
         publish(room);
         json(response, 202, { requestId });
@@ -974,6 +1014,8 @@ export function createJarvisServer({ model = process.env.JARVIS_MODEL || 'qwen3:
   });
 
   async function shutdown() {
+    routineBridge.close();
+    await workbench.close();
     await discord.close();
     phoneClosed = true; await phoneStarting; await phoneAccess?.close(); await phonePairing.close();
     speakerTurns.close();
@@ -996,10 +1038,12 @@ export function createJarvisServer({ model = process.env.JARVIS_MODEL || 'qwen3:
     for (const roomClients of clients.values()) for (const client of roomClients) client.end();
     await new Promise(resolve => server.close(resolve));
   }
-  return { server, displayServer: displayServer?.server, shutdown, startPhoneAccess, startDiscord: () => discord.start() };
+  return { server, displayServer: displayServer?.server, shutdown, startPhoneAccess, startDiscord: () => discord.start(), startWorkbench: () => workbench.start() };
 }
 
 if (process.argv[1] && pathToFileURL(fileURLToPath(import.meta.url)).href === pathToFileURL(process.argv[1]).href) {
+  const lan = await recoverLanBindings({directory:`${APP_ROOT}/private`,envFile:`${APP_ROOT}/.env.local`});
+  for(const note of lan.notes)console.warn(note);
   const port = Number(process.env.JARVIS_PORT || 3210);
   const app = createJarvisServer();
   app.server.on('error', error => {
@@ -1010,6 +1054,7 @@ if (process.argv[1] && pathToFileURL(fileURLToPath(import.meta.url)).href === pa
     console.log(`Jarvis is ready: http://127.0.0.1:${port}`);
     void app.startPhoneAccess();
     void app.startDiscord().catch(() => {});
+    void app.startWorkbench().catch(() => {});
     console.log('Press Enter on the page to ask a question. Press Escape to dismiss.');
     console.log('Local microphone recognition and neural spoken replies are ready. Connect Google Calendar in House setup when ready.');
   });
