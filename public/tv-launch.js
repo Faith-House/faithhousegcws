@@ -10,6 +10,8 @@ async function load(){
   $('target-display').value=settings.displayId||'';$('automatic-tv').checked=settings.enabled;$('wake-tv').checked=settings.wake;$('tv-mac').value=settings.mac||'';
   $('save-tv-launch').disabled=settings.configurationError;
   $('test-tv-launch').disabled=testing||!settings.target||!settings.receiver.enabled||!settings.remote.configured;
+  $('send-tv-address').disabled=!settings.receiver.enabled||!settings.remote.configured;
+  $('tv-receiver-address').textContent=settings.receiver.url||'Receiver is not running';
   if(settings.lastAttempt)$('tv-launch-result').textContent=settings.lastAttempt.detail;
  }catch(error){$('tv-launch-message').textContent=error.message;}
 }
@@ -26,3 +28,9 @@ $('test-tv-launch').addEventListener('click',async()=>{
  finally{testing=false;await load();}
 });
 void load();
+$('send-tv-address').addEventListener('click',async()=>{
+ $('send-tv-address').disabled=true;$('tv-address-result').textContent='Sending the Jarvis address to the TV keyboard…';
+ try{const result=await json('/api/tv-launch/address',{});$('tv-address-result').textContent=result.detail;}
+ catch(error){$('tv-address-result').textContent=error.message;}
+ finally{await load();}
+});

@@ -34,9 +34,14 @@ export function createTvAutolaunch({ directory, pairing, receiver, visible, remo
     if(broken||!target||target.room!==room||!config.enabled&&!force)return{ok:false,state:'disabled'};
     const set=(state,detail)=>{const result={ok:state==='confirmed',state,detail,at:now()};attempts.set(room,result);return result;};
     if(!info.receiver.enabled)return set('unavailable','The TV receiver is not listening on this computer’s configured network address.');
-    if(visible(target.id))return set('confirmed','The paired receiver reports that Jarvis is visible.');
     set('launching','Requesting the Samsung browser.');
     try {
+      if(visible(target.id)){
+        // Smart Hub can cover a page without changing its document visibility.
+        await remote.focusBrowser?.(info.receiver.url,{signal});
+        signal?.throwIfAborted();
+        if(visible(target.id))return set('confirmed','The paired receiver reports that Jarvis is visible.');
+      }
       if(!await remote.online({signal})){
         if(!config.wake)return set('unavailable','The TV is unavailable. Turn it on or configure Wake-on-LAN.');
         await remote.wake(config.mac);set('waking','Wake packet sent; waiting for the TV.');
@@ -56,5 +61,11 @@ export function createTvAutolaunch({ directory, pairing, receiver, visible, remo
     const combined = { ...options, signal: options.signal ? AbortSignal.any([options.signal, closing.signal]) : closing.signal };
     const promise=attempt(room,combined).finally(()=>pending.delete(room));pending.set(room,promise);return promise;
   }
-  return {status,configure,ensure,pending:room=>pending.has(room),close:async()=>{closing.abort(Error('TV launcher closed'));await chain;await Promise.allSettled([...pending.values()]);}};
+  async function enterAddress({signal}={}) {
+    const info=await status();
+    if(!info.receiver.enabled||!info.remote.configured||!remote.enterReceiverUrl)throw fail('Connect the Samsung remote and start the TV receiver first.');
+    if(info.target&&pending.has(info.target.room))throw fail('Wait for the current TV launch to finish.');
+    return remote.enterReceiverUrl(info.receiver.url,{signal});
+  }
+  return {status,configure,ensure,enterAddress,pending:room=>pending.has(room),close:async()=>{closing.abort(Error('TV launcher closed'));await chain;await Promise.allSettled([...pending.values()]);}};
 }

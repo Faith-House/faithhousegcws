@@ -41,17 +41,17 @@ Say or type **“Show the dashboard”** or **“Pull up the dashboard on the TV
 
 The TV receives only its assigned room’s timers, responses, and screen information, plus shared host readings and household names. It does not receive voice templates, other rooms’ activity, or central control access. If a shared calendar preview is requested, that room’s paired TV receives its event titles and times. The mode switch does not navigate the browser or change its address. Refresh the TV receiver once to load this update; the existing pairing remains valid.
 
-## Automatic Samsung TV launch — physical test pending
+## Automatic Samsung TV launch
 
-Open **TV launch** in the question panel or visit /tv-launch. This new integration can connect questions in one paired display's room to the saved Samsung remote connection. It reuses the approved local token and pinned TLS certificate. Select the test display, save with automatic launch off, and use **Test opening Jarvis on the TV** when someone can see the screen. The setup supports the existing single Samsung test TV; additional TVs need their own approved remote connections before expanding this mapping.
+Open **TV launch** in the question panel or visit /tv-launch. This installation's Samsung test TV is paired as **abc** for **Living Room**, with automatic launch enabled. On November 17, 2026, the user confirmed the rings/time display and automatic return from Samsung Home without reopening the browser. The setup supports this single approved Samsung connection; additional TVs need their own remote enrollment before expanding the mapping.
 
-The launcher requests the Tizen browser with the exact local receiver URL, then tries the known numeric Samsung Internet app ID if no receiver presence arrives. The paired receiver now reports foreground visibility. An open network connection alone is not treated as proof that Jarvis is visible. If the browser remains on its home page or needs pairing, the result stays unconfirmed. Physical appearance and navigation must be checked on the actual TV; this path has only been tested with simulated remote transport and paired receiver sessions so far.
+For this TV, the saved Home/REST method brings Samsung Internet forward, reusing its paired page. The Home key uses the approved token and pinned TLS certificate; the browser launch uses the TV's private REST endpoint. A connected page also receives an explicit activation request because Smart Hub can cover it without changing document visibility. Success still requires the paired receiver's visibility heartbeat. Other saved TV connections retain the previous WebSocket launch method. A browser home page or missing pairing stays unconfirmed.
 
 After a successful physical test, enable automatic launch. Questions in the assigned room then request the TV in the background while the assistant answers. The answer remains available while launch is pending. Other rooms do not operate this TV. Wake-on-LAN is optional and requires the TV's MAC address and compatible enabled standby network wake; a wake packet does not prove the TV powered on. Previous TV apps/HDMI are not automatically restored, and this does not overlay Jarvis on a show.
 
-Automatic launch and wake remain off by default. The user said the TV was not available for a launch test, so no browser, input or power commands were sent to the physical TV during this implementation. The saved remote token and pinned certificate are not exposed by the setup routes. The central control interface stays on localhost; the TV receiver retains only its room's read-only access plus its own presence heartbeat. Phone access is available separately through the paired HTTPS gateway described below.
+New installations start with automatic launch and wake off. Automatic launch is now enabled for this Living Room test TV; wake remains off and untested. The TV must already be on. The saved remote token and certificate are not exposed by setup routes. Central controls stay on localhost; the TV receiver has only room-bound read-only access and presence reporting. Phone access is separate through the paired HTTPS gateway below.
 
-A changed computer LAN address requires updating the receiver address and may require pairing the TV browser once at the new address. Refresh a previously open receiver page once to load the presence reporting update. Receiver or navigation failures appear in the TV launch page and tool activity, rather than becoming a spoken success claim. Protocol references: [SamsungTVWS browser launcher](https://github.com/xchwarze/samsung-tv-ws-api/blob/master/samsungtvws/remote.py) and [Home Assistant Samsung wake guidance](https://www.home-assistant.io/integrations/samsungtv/#turn-on-action).
+A changed computer LAN address may require opening the new address and pairing once. To avoid typing the URL, select the TV browser's address bar so its keyboard opens, then press **Send Jarvis address to TV** on `/tv-launch`. This sends only the configured receiver URL; it does not assume or change input focus. The user physically verified remote address entry during setup. Delivery alone is unconfirmed until the paired page reports visible. Protocol references: [SamsungTVWS text input and browser control](https://github.com/xchwarze/samsung-tv-ws-api/blob/master/samsungtvws/remote.py), [SamsungTVWS REST app control](https://github.com/xchwarze/samsung-tv-ws-api/blob/master/samsungtvws/rest.py) and [Home Assistant Samsung wake guidance](https://www.home-assistant.io/integrations/samsungtv/#turn-on-action).
 
 ## Discord text and voice
 
@@ -191,7 +191,7 @@ The default model is deliberately small for the current laptop. It is a connecti
 
 The question input has a room selector. A display receives only events for its selected room. To test, open a normal page and a clean-display page on the same computer with the same room. Other rooms' displays should remain idle. Rooms are routing contexts, not authenticated personal identities.
 
-The control page listens only on this computer's loopback address. A separate read-only, room-bound TV receiver is configured for the saved home address. The Samsung is paired as abc; the user confirmed a time answer appeared. Latest dashboard rendering and view-switch behavior still need the next physical Samsung check. See HOUSE-SETUP.md. Room microphone hardware remains to be connected.
+The control page listens only on this computer's loopback address. A separate read-only, room-bound TV receiver is configured for the saved home address. The Samsung is paired as abc in Living Room; the user confirmed a time answer and automatic browser return. See HOUSE-SETUP.md. Room microphone hardware remains to be connected.
 
 ## What works
 
@@ -207,7 +207,7 @@ The control page listens only on this computer's loopback address. A separate re
 
 ## What comes later
 
-Room microphone units, automatic TV wake/app switching, Home Assistant devices, personal authentication, Google/iCloud accounts, router device monitoring, and telephone service remain to be connected. A Home Assistant bridge is prepared for explicitly approved shared lights and TVs; private devices and door controls remain blocked. See HOUSE-SETUP.md. A model response is not evidence that a home action occurred.
+Room microphone units, TV wake from standby, Home Assistant devices, personal authentication, Google/iCloud accounts, router device monitoring, and telephone service remain to be connected. Automatic browser return works for the Living Room Samsung test TV while it is on. A Home Assistant bridge is prepared for explicitly approved shared lights and TVs; private devices and door controls remain blocked. See HOUSE-SETUP.md. A model response is not evidence that a home action occurred.
 
 ## Configuration
 

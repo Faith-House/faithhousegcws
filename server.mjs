@@ -723,6 +723,12 @@ export function createJarvisServer({ model = process.env.JARVIS_MODEL || 'qwen3:
       }
       if (request.method === 'GET' && url.pathname === '/api/tv-launch') return json(response, 200, await tvLaunch.status());
       if (request.method === 'POST' && url.pathname === '/api/tv-launch') return json(response, 200, await tvLaunch.configure(await readJson(request)));
+      if (request.method === 'POST' && url.pathname === '/api/tv-launch/address') {
+        const body=await readJson(request);
+        if(!body||typeof body!=='object'||Array.isArray(body)||Object.keys(body).length)return json(response,400,{error:'Use the saved Jarvis receiver address from TV setup.'});
+        const controller=new AbortController();response.once('close',()=>{if(!response.writableEnded)controller.abort(Error('TV address entry cancelled.'));});
+        return json(response,200,await tvLaunch.enterAddress({signal:controller.signal}));
+      }
       if (request.method === 'POST' && url.pathname === '/api/tv-launch/test') {
         await readJson(request);
         const info = await tvLaunch.status();
