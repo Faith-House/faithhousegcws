@@ -1,3 +1,4 @@
+import { screenTarget } from './screen-target.mjs';
 // Parse a direct navigation request. Household views keep their existing routes.
 export function navigationRequest(question) {
   if (
@@ -6,7 +7,8 @@ export function navigationRequest(question) {
     /[\x00-\x1f`{}]/.test(question)
   )
     return null;
-  let q = question
+  const output = screenTarget(question);
+  let q = output.question
     .trim()
     .replaceAll("’", "'")
     .replace(/^(?:hey\s+)?jarvis[,\s:]*/i, "");
@@ -23,7 +25,7 @@ export function navigationRequest(question) {
   const match =
     q.match(
       /^(?:open|launch|start|visit|navigate(?: to)?|go to|take me to|pull up|bring up|switch(?: over)? to|focus(?: on)?|show(?: me)?)\s+(.+)$/i,
-    ) || q.match(/^bring\s+(.+?)\s+to (?:the )?(?:front|foreground)[?!.]*$/i);
+    ) || q.match(/^bring\s+(.+?)\s+to (?:the )?(?:front|foreground)[?!.]*$/i) || q.match(/^(?:play|put(?: on)?)\s+(you ?tube)[?!.]*$/i);
   if (!match) return null;
   let target = match[1].trim().replace(/\s+(?:for me|please)[?!.]*$/i, "");
   let compound =
@@ -94,6 +96,7 @@ export function navigationRequest(question) {
     explicitApp,
     displayOnly: /^(?:show|start)\b/i.test(q),
     explicitBrowser: browserHint || Boolean(engine),
+    ...(output.destination ? { destination: output.destination } : {}),
     ...(engine ? { engine } : {}),
   };
 }

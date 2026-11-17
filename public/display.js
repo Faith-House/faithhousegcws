@@ -7,14 +7,21 @@ let renderAgenda = preview => {
 import('./agenda.js').then(module => { renderAgenda = module.renderAgenda; render(lastSnapshot); }).catch(() => {});
 import { JarvisOrb } from './orb.js';
 import { RoomDashboard } from './tv-dashboard.js';
+import { createDisplayNavigator } from './display-navigation.js';
 const $ = id => document.getElementById(id);
 const orb = new JarvisOrb($('orb'));
 const dashboard = new RoomDashboard({ hud: $('hud'), onUnauthorized: () => showPairing('Pair this display again from House setup.') });
 let presenceTimer;
+let displayId;
+const screenNavigator=createDisplayNavigator({acknowledge:async id=>{
+  const response=await fetch('/api/navigation/ack',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id}),signal:AbortSignal.timeout(3000)});
+  return response.ok;
+},onError:message=>{$('connection').textContent=message;$('connection').hidden=false;}});
 let events, reconnectTimer, closed = false, sessionCheck, visualExpiry;
 let lastSnapshot = { state: 'idle' }, voiceVisual = null;
 orb.setLevelSource(() => voiceVisual?.level || 0);
 function showPairing(message = '') {
+  displayId=null;
   clearInterval(presenceTimer);
   dashboard.setView(false);
   clearTimeout(visualExpiry); voiceVisual = null;
@@ -47,7 +54,7 @@ function render(snapshot) {
 }
 async function reportPresence() {
   if (closed || !$('pairing').hidden) return;
-  try { await fetch('/api/presence', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ visible: document.visibilityState === 'visible' }), signal: AbortSignal.timeout(2000) }); } catch { /* Next heartbeat retries. */ }
+  try { await fetch('/api/presence', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ visible: document.visibilityState === 'visible', navigation:true }), signal: AbortSignal.timeout(2000) }); } catch { /* Next heartbeat retries. */ }
 }
 document.addEventListener('visibilitychange', () => void reportPresence());
 function connect() {
@@ -58,6 +65,7 @@ function connect() {
   events = new EventSource('/api/events');
   events.onopen = () => { clearTimeout(reconnectTimer); $('connection').hidden = true; };
   events.onmessage = event => { try { render(JSON.parse(event.data)); } catch { $('connection').hidden = false; } };
+  events.addEventListener('navigate',event=>{try{if($('pairing').hidden)void screenNavigator.apply(JSON.parse(event.data),displayId);}catch{}});
   events.addEventListener('visual', event => {
     try {
       const visual = JSON.parse(event.data);
@@ -80,6 +88,7 @@ async function checkSession(start = true) {
     const response = await fetch('/api/display-session');
     if (response.status === 401) return showPairing();
     if (!response.ok) throw new Error('Receiver unavailable');
+    displayId=(await response.json()).id;
     if (start) connect();
   } catch { if (closed) return; $('connection').hidden = false; sessionCheck = setTimeout(() => { void checkSession(start); }, 5000); }
 }
@@ -90,7 +99,7 @@ $('pair-form').addEventListener('submit', async event => {
     const response = await fetch('/api/pair', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: $('pair-code').value, name: $('display-name').value.trim() }) });
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || 'Pairing failed.');
-    $('pair-code').value = ''; connect();
+    $('pair-code').value = ''; await checkSession();
   } catch (error) { $('pair-error').textContent = error.message; $('pair-error').hidden = false; }
   finally { button.disabled = false; }
 });

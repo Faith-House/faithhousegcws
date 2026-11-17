@@ -40,9 +40,9 @@ export function browserIntent(question) {
   )
     return { type: "read" };
   const request = navigationRequest(question);
-  if (!request || request.explicitApp) return null;
+  if (!request || (request.explicitApp && !/^you ?tube$/i.test(request.target))) return null;
   const { target, compound, explicitBrowser: hint, engine } = request;
-  const options = engine ? { engine } : {};
+  const options = { ...(engine ? { engine } : {}), ...(request.destination ? { destination: request.destination } : {}) };
   if (compound) {
     if (
       hint ||

@@ -74,6 +74,7 @@ export function createWorkbench({
   sendDiscord,
   discordStatus,
   styleChanged = () => {},
+  websiteOutput = null,
   modelCall: customModel,
   desktop: createDesktop = createNativeDesktop,
   browser: createBrowser = createManagedBrowser,
@@ -181,6 +182,7 @@ export function createWorkbench({
       profileId: profile?.id || null,
       room: input.room,
       client: clientDevice(input.client),
+      ...(typeof input.question === 'string' ? { question: input.question.slice(0,24000) } : {}),
       ...(input.signal instanceof AbortSignal ? { signal: input.signal } : {}),
     };
   }
@@ -632,6 +634,10 @@ export function createWorkbench({
       );
     }
     if (action === "desktop") {
+      if (args.operation === 'open_app' && /^you ?tube(?: app)?$/i.test(args.app || '') && websiteOutput && (await store.read()).settings.browserEnabled) {
+        const plan = await websiteOutput(context, 'https://www.youtube.com/');
+        if (plan) return staged(context, plan.label, { url: 'https://www.youtube.com/' }, plan.execute);
+      }
       if (
         context.client &&
         (context.client.kind !== "browser" || !context.client.desktop)
@@ -664,6 +670,10 @@ export function createWorkbench({
           "Enable the managed browser in Workbench settings first.",
           409,
         );
+      if (args.operation === 'open' && websiteOutput) {
+        const plan = await websiteOutput(context, args.url);
+        if (plan) return staged(context, plan.label, { url: args.url }, plan.execute);
+      }
       if (context.client) {
         if (args.operation !== "open")
           throw problem(
@@ -1227,7 +1237,7 @@ export function createWorkbench({
       ),
       tool(
         "open_managed_browser",
-        "Open a URL and bring the isolated browser window forward on the Jarvis computer. Select Edge or Chrome when requested; otherwise reuse the last browser. Reports actual URL and foreground outcome.",
+        "Open a website on the room’s paired screen when screen routing is enabled, otherwise on the requesting device. Explicit phone/computer wording overrides the screen. YouTube can use the TV’s installed app. Manual Workbench sessions use the isolated central browser. Page handoffs are unverified unless the TV confirms its app is visible.",
         {
           url: string(2000),
           engine: { type: "string", enum: ["edge", "chrome"] },

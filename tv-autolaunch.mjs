@@ -1,13 +1,15 @@
 import { mkdir, readFile, writeFile, rename } from 'node:fs/promises';
 import path from 'node:path';
+import { screenTarget, websiteAddress } from './screen-target.mjs';
+import { navigationRequest } from './navigation-intents.mjs';
 const delay = ms => new Promise(r => setTimeout(r, ms));
 const fail = message => Object.assign(new Error(message), { status: 400 });
-export function createTvAutolaunch({ directory, pairing, receiver, visible, remote, now = Date.now, wait = delay, confirmMs = 7000, wakeMs = 12000 } = {}) {
+export function createTvAutolaunch({ directory, pairing, receiver, visible, remote, navigate, canNavigate, now = Date.now, wait = delay, confirmMs = 7000, wakeMs = 12000 } = {}) {
   const file = path.join(directory,'tv-autolaunch.json');
-  let config = { enabled:false, displayId:null, wake:false, mac:'' }, initialized, broken=false, chain=Promise.resolve();
+  let config = { enabled:false, displayId:null, wake:false, mac:'', websitesOnScreens:false }, initialized, broken=false, chain=Promise.resolve();
   const pending = new Map(), attempts = new Map(), closing = new AbortController();
   async function initialize() {
-    if(!initialized)initialized=(async()=>{try{const data=JSON.parse(await readFile(file,'utf8'));if(data.format!==1||typeof data.enabled!=='boolean'||typeof data.displayId!=='string'||typeof data.wake!=='boolean'||typeof data.mac!=='string')throw Error();config=data;}catch(error){if(error.code!=='ENOENT')broken=true;}})();
+    if(!initialized)initialized=(async()=>{try{const data=JSON.parse(await readFile(file,'utf8'));if(data.format!==1||typeof data.enabled!=='boolean'||typeof data.displayId!=='string'||typeof data.wake!=='boolean'||typeof data.mac!=='string'||(data.websitesOnScreens!==undefined&&typeof data.websitesOnScreens!=='boolean'))throw Error();config={...config,...data};}catch(error){if(error.code!=='ENOENT')broken=true;}})();
     return initialized;
   }
   async function status() {
@@ -17,10 +19,10 @@ export function createTvAutolaunch({ directory, pairing, receiver, visible, remo
   function configure(input) {
     const task=chain.then(async()=>{
       await initialize(); if(broken)throw fail('The saved TV launch settings need attention. The original file was preserved.');
-      if(!input||Object.keys(input).some(k=>!['enabled','displayId','wake','mac'].includes(k))||typeof input.enabled!=='boolean'||typeof input.wake!=='boolean'||typeof input.mac!=='string'||typeof input.displayId!=='string')throw fail('Choose a paired TV and valid automatic launch settings.');
+      if(!input||Object.keys(input).some(k=>!['enabled','displayId','wake','mac','websitesOnScreens'].includes(k))||typeof input.enabled!=='boolean'||typeof input.wake!=='boolean'||typeof input.mac!=='string'||typeof input.displayId!=='string'||(input.websitesOnScreens!==undefined&&typeof input.websitesOnScreens!=='boolean'))throw fail('Choose a paired TV and valid automatic launch settings.');
       const target=(await pairing.list()).devices.find(d=>d.id===input.displayId);if(!target)throw fail('Choose a currently paired display.');
       if(input.mac&&!/^(?:[\da-f]{2}:){5}[\da-f]{2}$/i.test(input.mac)||input.wake&&!input.mac)throw fail('Wake needs the TV’s valid network MAC address.');
-      const next={format:1,enabled:input.enabled,displayId:target.id,wake:input.wake,mac:input.mac};
+      const next={format:1,enabled:input.enabled,displayId:target.id,wake:input.wake,mac:input.mac,websitesOnScreens:input.websitesOnScreens??config.websitesOnScreens};
       await mkdir(directory,{recursive:true});await writeFile(file+'.tmp',JSON.stringify(next,null,2)+'\n',{mode:0o600});await rename(file+'.tmp',file);config=next;return status();
     });chain=task.catch(()=>{});return task;
   }
@@ -67,5 +69,45 @@ export function createTvAutolaunch({ directory, pairing, receiver, visible, remo
     if(info.target&&pending.has(info.target.room))throw fail('Wait for the current TV launch to finish.');
     return remote.enterReceiverUrl(info.receiver.url,{signal});
   }
-  return {status,configure,ensure,enterAddress,pending:room=>pending.has(room),close:async()=>{closing.abort(Error('TV launcher closed'));await chain;await Promise.allSettled([...pending.values()]);}};
+  async function websitePlan(context,address) {
+    const url=websiteAddress(address),destination=screenTarget(context.question).destination;
+    if(destination?.type==='device'){
+      if(context.client?.kind==='browser'&&((destination.device==='phone'&&context.client.desktop)||(destination.device==='computer'&&!context.client.desktop)))throw fail('Ask from that device’s Jarvis page to open the website there.');
+      return null;
+    }
+    const info=await status();
+    const explicit=destination?.type==='display';
+    if(!explicit&&(!info.websitesOnScreens||!context.client||navigationRequest(context.question)?.engine))return null;
+    const devices=(await pairing.list()).devices.filter(d=>d.room===context.room);
+    const normalized=value=>String(value).toLowerCase().replace(/\b(?:the|tv|television|screen|display)\b/g,'').replaceAll('-',' ').replace(/\s+/g,' ').trim();
+    let target;
+    if(destination?.name){
+      const candidates=devices.filter(d=>normalized(d.name)===normalized(destination.name)||normalized(d.room)===normalized(destination.name));
+      if(candidates.length!==1)throw fail('Choose a paired screen in this room by its name.');
+      target=candidates[0];
+    }else if(info.target?.room===context.room)target=devices.find(d=>d.id===info.target.id);
+    else{
+      const candidates=devices.filter(d=>visible(d.id));
+      if(candidates.length>1)throw fail('More than one screen is showing Jarvis here. Say the screen’s name.');
+      target=candidates[0];
+    }
+    if(!target){if(explicit)throw fail('No paired screen is available in this room.');return null;}
+    return {label:`Open website on ${target.name}`,execute:async()=>{
+      context.signal?.throwIfAborted();
+      const fresh=await status(),current=(await pairing.list()).devices.find(d=>d.id===target.id&&d.room===context.room);
+      if(!current||(!explicit&&!fresh.websitesOnScreens)||(target.id===info.target?.id&&fresh.target?.id!==target.id))throw fail('The screen assignment changed. Ask again using the current screen.');
+      const previous=pending.get(context.room);if(previous)await previous;
+      context.signal?.throwIfAborted();
+      const native=target.id===fresh.target?.id&&fresh.remote.configured&&!navigationRequest(context.question)?.explicitBrowser&&remote.openWebsite?await remote.openWebsite(url.href,{signal:context.signal}):null;
+      context.signal?.throwIfAborted();
+      if(native?.supported)return{ok:true,outcome:native.confirmed?'confirmed':'unverified',summary:native.confirmed?`${native.app} is open on ${target.name}.`:`The ${native.app} launch was requested on ${target.name}, but the TV has not confirmed it is visible.`,url:url.href,outputTarget:{kind:'display',id:target.id,name:target.name}};
+      if(target.id===fresh.target?.id&&!visible(target.id))await ensure(context.room,{force:true,signal:context.signal});
+      if(!navigate||!visible(target.id))throw fail(`Open Jarvis on ${target.name} first so it can receive the website.`);
+      if(canNavigate&&!canNavigate(target.id))throw fail(`Refresh the Jarvis page on ${target.name} once to load its website controls, then ask again.`);
+      const sent=await navigate(target.id,url.href,{signal:context.signal});
+      context.signal?.throwIfAborted();
+      return{ok:true,outcome:'unverified',summary:sent.delivered?`Opening ${url.hostname} on ${target.name}. Use the TV’s Back button to return to Jarvis.`:`The website was sent to ${target.name}, but delivery could not be confirmed.`,url:url.href,outputTarget:{kind:'display',id:target.id,name:target.name}};
+    }};
+  }
+  return {status,configure,ensure,enterAddress,websitePlan,pending:room=>pending.has(room),close:async()=>{closing.abort(Error('TV launcher closed'));await chain;await Promise.allSettled([...pending.values()]);}};
 }

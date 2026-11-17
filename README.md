@@ -12,7 +12,7 @@ Open **Workbench** from the dashboard for managed files, background tasks, routi
 
 Direct execution covers supported computer/browser actions, explicitly requested Discord messages, applying code proposals and running managed JavaScript/Python files. Existing workspace boundaries, installed Windows app entries, configured Discord channels, process limits and file-change checks still apply. Code generation produces draft files; applying or running them is a separate command. Running a file uses the Windows account’s permissions. Calendar event confirmations remain part of calendar setup and are separate from Workbench execution settings.
 
-Say **“Open Word,” “Switch to Calculator,”** or **“Open YouTube in Chrome.”** Jarvis launches or reuses the requested app, navigates to websites in Edge or Chrome and checks foreground focus on the central computer. The Computer page lists installed app names. Failed or unfocused actions are reported honestly. These same commands work through linked Discord accounts and paired phone access; they operate the computer running Jarvis.
+Say **“Open YouTube”** to open it on the room’s paired screen when screen routing is enabled. This installation uses the Samsung **abc** in **Living Room**; the user confirmed its native YouTube app opened. **“Open YouTube on this computer”** or **“on my phone”** uses the device making that request instead. Without a room screen, websites use the requesting browser; Discord returns a link. **“Open Word”** and **“Switch to Calculator”** control installed apps when asked from the central computer. Remote native app control needs a companion on that device. The Computer page lists installed app names, and failed or unfocused actions are reported honestly.
 
 App and website commands also work with **Shared profile**; shared browser sessions are separate for each room. Use the dashboard’s **Using** menu for personal files or saved preferences. A failed voice match preserves a manually chosen profile while an unknown speaker never inherits the previous person recognized by voice.
 
@@ -51,6 +51,10 @@ After a successful physical test, enable automatic launch. Questions in the assi
 
 New installations start with automatic launch and wake off. Automatic launch is now enabled for this Living Room test TV; wake remains off and untested. The TV must already be on. The saved remote token and certificate are not exposed by setup routes. Central controls stay on localhost; the TV receiver has only room-bound read-only access and presence reporting. Phone access is separate through the paired HTTPS gateway below.
 
+**Open websites on the room’s screen by default** is also enabled for this installation at `/tv-launch`; new installations leave it off. **“Open YouTube,” “Play YouTube,”** or **“Open YouTube on abc TV”** launches the installed Samsung YouTube app and checks that the TV reports it visible. A website request does not immediately pull Jarvis back over that app. Normal questions can bring the paired Jarvis page forward again. A named screen must belong to the request’s room; other rooms cannot operate abc.
+
+Other websites and specific YouTube links use the paired screen’s browser. Refresh its Jarvis page once to load these website controls. The receiver acknowledges a one-time command, then navigates in the same tab; use the TV’s **Back** button to return to Jarvis afterward. Delivery does not prove the destination finished loading, so these replies say “Opening.” This browser handoff and return were verified in an isolated paired browser; native YouTube was verified on the physical TV. Opening the native app does not search or select a video. Explicit phone/computer destinations require asking from that device; specifying Chrome or Edge without a TV destination keeps the request on the originating device.
+
 A changed computer LAN address may require opening the new address and pairing once. To avoid typing the URL, select the TV browser's address bar so its keyboard opens, then press **Send Jarvis address to TV** on `/tv-launch`. This sends only the configured receiver URL; it does not assume or change input focus. The user physically verified remote address entry during setup. Delivery alone is unconfirmed until the paired page reports visible. Protocol references: [SamsungTVWS text input and browser control](https://github.com/xchwarze/samsung-tv-ws-api/blob/master/samsungtvws/remote.py), [SamsungTVWS REST app control](https://github.com/xchwarze/samsung-tv-ws-api/blob/master/samsungtvws/rest.py) and [Home Assistant Samsung wake guidance](https://www.home-assistant.io/integrations/samsungtv/#turn-on-action).
 
 ## Discord text and voice
@@ -73,7 +77,7 @@ House setup at /setup can import a Google Desktop OAuth client file and start Go
 
 This prototype currently connects one account’s primary calendar, so use a dedicated shared household Google account with no private events. Anyone using the shared assistant can ask to see it. Voice matching is not personal-calendar authorization. Private calendars, individual account switching, Apple Calendar, and personal-calendar privacy controls are not connected.
 
-The home TV address is still configured for the home network. On the current different Wi-Fi, the central dashboard works on localhost and the saved screen is shown as paired, with its receiver unavailable. No new network or firewall access was opened.
+The receiver uses the central computer’s configured home-network address. A changed network can require one-time address entry and pairing again; the dashboard remains available on localhost. No public network access or new firewall rules were added.
 
 ## Local reminders
 

@@ -1,6 +1,6 @@
 import { createAgentHarness } from './agent-harness.mjs';
 import { createWorkbench } from './workbench.mjs';
-import { isBrowserRequest } from './browser-intents.mjs';
+import { isBrowserRequest, browserIntent } from './browser-intents.mjs';
 import { computerIntent } from './computer-intents.mjs';
 import { appIntent } from './navigation-intents.mjs';
 import { clientDevice } from './device-actions.mjs';
@@ -219,6 +219,7 @@ export function createJarvisServer({ model = process.env.JARVIS_MODEL || 'qwen3:
   let visualStyle = 'rings';
   const routineBridge = createDiscordBridge({baseUrl:()=>`http://127.0.0.1:${server.address().port}/`,timeoutMs:90000});
   const workbench = createWorkbench({ directory: actionsOptions.dataDirectory || `${APP_ROOT}/private`, profiles, rooms: ROOMS, base, model, webSearch, systemHealth,
+    websiteOutput: (context,url) => tvLaunch.websitePlan(context,url),
     notify: item => { if (!ROOMS.includes(item.room)) return; const message = String(item.title).slice(0,600); update(item.room,{notification:{id:randomUUID(),kind:'workbench',createdAt:Date.now(),message}}); },
     sendDiscord: input => discord.sendApproved(input), discordStatus: () => discord.status(),
     runCommand: routine => routineBridge.ask('routine:'+routine.id,routine,routine.instruction),
@@ -232,7 +233,7 @@ export function createJarvisServer({ model = process.env.JARVIS_MODEL || 'qwen3:
   const tvLaunch = createTvAutolaunch({ directory: actionsOptions.dataDirectory || `${APP_ROOT}/private`, pairing,
     receiver: () => ({ enabled: Boolean(displayServer?.server.listening), url: displayServer?.server.listening ? `http://${displayBind}:${displayServer.server.address().port}/` : null }),
     visible: id => displayServer?.isVisible(id) || false,
-    remote: createSamsungLauncher({ directory: actionsOptions.dataDirectory || `${APP_ROOT}/private` }), ...tvLaunchOptions });
+    remote: createSamsungLauncher({ directory: actionsOptions.dataDirectory || `${APP_ROOT}/private` }), navigate: (id,url,options) => displayServer.navigate(id,url,options), canNavigate: id => displayServer?.canNavigate(id) || false, ...tvLaunchOptions });
   async function bringUpTv(room, requestId, signal) {
     const info = await tvLaunch.status();
     if (!info.enabled || info.target?.room !== room) return;
@@ -409,7 +410,7 @@ export function createJarvisServer({ model = process.env.JARVIS_MODEL || 'qwen3:
       respond({ state: 'ready', answer: result.answer, ...(result.patch || {}), resultKind: result.clarification ? 'clarification' : result.patch?.view ? 'view' : 'tool-agent', toolActivity: result.activity || [] }); return true;
     };
     try {
-      void bringUpTv(room, requestId, controller.signal).catch(() => {});
+      if(!['open','compound'].includes(browserIntent(originalQuestion)?.type))void bringUpTv(room, requestId, controller.signal).catch(() => {});
       const runActions = async () => {
       const extended = await workbench.handle(originalQuestion,context);
       if(extended){if(extended.result&&!extended.readOnly)undoHistory.record(context,{...extended.result,undoUnsupported:!extended.result.undo});respond({state:'ready',answer:extended.answer,resultKind:'workbench',toolOutcome:extended.result?.outcome||null,...(extended.result?.deviceAction?{deviceActions:[extended.result.deviceAction]}:{})});return;}

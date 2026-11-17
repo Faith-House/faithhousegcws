@@ -4,6 +4,7 @@ import { X509Certificate } from 'node:crypto';
 import { isIP } from 'node:net';
 import dgram from 'node:dgram';
 import WebSocket from 'ws';
+import { websiteAddress } from './screen-target.mjs';
 
 const fail = message => Object.assign(new Error(message), { status: 409 });
 export const privateIPv4 = address => isIP(address) === 4 && /^(?:10\.|192\.168\.|172\.(?:1[6-9]|2\d|3[01])\.)/.test(address);
@@ -125,5 +126,37 @@ export function createSamsungLauncher({ directory, fetchImpl = fetch, WebSocketI
     ], { signal });
     return {requested:true,navigationConfirmed:false,detail:'The Jarvis address was sent to the TV. Pair the screen if prompted.'};
   }
-  return { status, online, launchBrowser, focusBrowser, enterReceiverUrl, wake: sendWakeImpl };
+  async function openWebsite(address, { signal } = {}) {
+    const url = websiteAddress(address);
+    if (!['youtube.com','www.youtube.com','m.youtube.com'].includes(url.hostname) || url.pathname !== '/' || url.search || url.hash) return { supported: false };
+    const config = await saved();
+    const request = async (app, method = 'GET') => {
+      signal?.throwIfAborted();
+      try {
+        const result = await fetchImpl(`http://${config.host}:8001/api/v2/applications/${app}`, { method, redirect: 'error', signal: signal ? AbortSignal.any([signal,AbortSignal.timeout(5000)]) : AbortSignal.timeout(5000) });
+        return { ok: result.ok, status: result.status, data: await result.json().catch(()=>null) };
+      } catch { signal?.throwIfAborted();throw fail('The TV did not answer. Check its power and network connection.'); }
+    };
+    let app, current;
+    for (const candidate of ['111299001912','9Ur5IzDKqV.TizenYouTube']) {
+      const result = await request(candidate);
+      if (result.ok && /^youtube$/i.test(result.data?.name || '')) { app = candidate; current = result.data; break; }
+    }
+    if (!app) return { supported: false };
+    if (!current.visible) {
+      await sendRemote(config,{method:'ms.remote.control',params:{Cmd:'Click',DataOfCmd:'KEY_HOME',Option:'false',TypeOfRemote:'SendRemoteKey'}},{signal});
+      await wait(500);
+    }
+    const launched = await request(app,'POST');
+    if (!launched.ok || launched.data === false || Number(launched.data?.code) >= 400) throw fail('The TV rejected the YouTube launch.');
+    let confirmed = false;
+    for (let attempt = 0; attempt < 12; attempt++) {
+      const result = await request(app);
+      if (result.data?.running === true && result.data.visible === true) { confirmed = true; break; }
+      await wait(350);
+    }
+    signal?.throwIfAborted();
+    return { supported: true, confirmed, app: 'YouTube' };
+  }
+  return { status, online, launchBrowser, focusBrowser, enterReceiverUrl, openWebsite, wake: sendWakeImpl };
 }

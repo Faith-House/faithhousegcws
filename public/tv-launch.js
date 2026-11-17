@@ -8,6 +8,7 @@ async function load(){
   $('receiver-readiness').textContent=settings.receiver.enabled?'The local TV receiver is running.':'The local TV receiver is not listening. Check the computer’s current network address in House setup before testing.';
   $('target-display').replaceChildren(new Option('Choose a display…',''),...displays.devices.map(d=>new Option(d.name+' · '+d.room.replaceAll('-',' '),d.id)));
   $('target-display').value=settings.displayId||'';$('automatic-tv').checked=settings.enabled;$('wake-tv').checked=settings.wake;$('tv-mac').value=settings.mac||'';
+  $('screen-websites').checked=settings.websitesOnScreens===true;
   $('save-tv-launch').disabled=settings.configurationError;
   $('test-tv-launch').disabled=testing||!settings.target||!settings.receiver.enabled||!settings.remote.configured;
   $('send-tv-address').disabled=!settings.receiver.enabled||!settings.remote.configured;
@@ -17,7 +18,7 @@ async function load(){
 }
 $('tv-launch-form').addEventListener('submit',async event=>{
  event.preventDefault();$('save-tv-launch').disabled=true;
- try{await json('/api/tv-launch',{enabled:$('automatic-tv').checked,displayId:$('target-display').value,wake:$('wake-tv').checked,mac:$('tv-mac').value.trim()});await load();$('tv-launch-message').textContent=info.enabled?'Saved. Questions in the selected room will request this Samsung display.':'Saved. Automatic launch is off; use Test when you can see the TV.';}
+ try{await json('/api/tv-launch',{enabled:$('automatic-tv').checked,displayId:$('target-display').value,wake:$('wake-tv').checked,mac:$('tv-mac').value.trim(),websitesOnScreens:$('screen-websites').checked});await load();$('tv-launch-message').textContent=info.enabled?'Saved. Questions in the selected room will request this Samsung display.':'Saved. Automatic launch is off; use Test when you can see the TV.';}
  catch(error){$('tv-launch-message').textContent=error.message;}
  finally{$('save-tv-launch').disabled=info?.configurationError||false;}
 });

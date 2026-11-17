@@ -1,10 +1,13 @@
 import http from 'node:http';
 import { readFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import { websiteAddress } from './screen-target.mjs';
 const publicRoot = new URL('./public/', import.meta.url);
 const publicAssets = new Map([
   ['/', ['display.html', 'text/html; charset=utf-8']],
   ['/display', ['display.html', 'text/html; charset=utf-8']],
   ['/display.js', ['display.js', 'text/javascript; charset=utf-8']],
+  ['/display-navigation.js', ['display-navigation.js', 'text/javascript; charset=utf-8']],
   ['/orb.js', ['orb.js', 'text/javascript; charset=utf-8']],
   ['/hud.css', ['hud.css', 'text/css; charset=utf-8']],
   ['/dashboard.css', ['dashboard.css', 'text/css; charset=utf-8']],
@@ -18,7 +21,7 @@ const publicAssets = new Map([
 ]);
 const json = (response, status, data) => { response.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); response.end(JSON.stringify(data)); };
 export function createDisplayServer({ pairing, bindAddress, snapshot, subscribe, dashboard, allowedHosts = [] } = {}) {
-  const streams = new Map(), presence = new Map();
+  const streams = new Map(), presence = new Map(), navigations = new Map();
   const hosts = new Set([bindAddress, '127.0.0.1', 'localhost', ...allowedHosts]);
   const server = http.createServer(async (request, response) => {
     response.setHeader('X-Content-Type-Options', 'nosniff'); response.setHeader('Referrer-Policy', 'no-referrer');
@@ -47,13 +50,21 @@ export function createDisplayServer({ pairing, bindAddress, snapshot, subscribe,
       const token = request.headers.cookie?.split(';').map(part => part.trim()).find(part => part.startsWith('jarvis_display='))?.slice('jarvis_display='.length);
       const session = await pairing.authenticate(token);
       if (!session) return json(response, 401, { error: 'Pair this display from the central computer.' });
+      if(request.method==='POST'&&url.pathname==='/api/navigation/ack'){
+        if(request.headers['content-type']!=='application/json')return json(response,415,{error:'Use the paired receiver.'});
+        let size=0;const chunks=[];for await(const chunk of request){size+=chunk.length;if(size>256)return json(response,413,{error:'Invalid navigation acknowledgement.'});chunks.push(chunk);}
+        let body;try{body=JSON.parse(Buffer.concat(chunks));}catch{return json(response,400,{error:'Invalid navigation acknowledgement.'});}
+        const pending=typeof body?.id==='string'?navigations.get(body.id):null;
+        if(!pending||pending.displayId!==session.id)return json(response,409,{error:'That screen command expired or belongs to another display.'});
+        pending.finish(true);return json(response,200,{ok:true});
+      }
       if (request.method === 'POST' && url.pathname === '/api/presence') {
         if (request.headers['content-type'] !== 'application/json') return json(response, 415, { error: 'Use the paired receiver page.' });
         const chunks = []; let size = 0;
         for await (const chunk of request) { size += chunk.length; if (size > 512) return json(response, 413, { error: 'Presence update is too large.' }); chunks.push(chunk); }
         let body; try { body = JSON.parse(Buffer.concat(chunks).toString()); } catch { return json(response, 400, { error: 'Invalid presence update.' }); }
-        if (!body || Object.keys(body).some(key => key !== 'visible') || typeof body.visible !== 'boolean') return json(response, 400, { error: 'Invalid presence update.' });
-        presence.set(session.id, { visible: body.visible, at: Date.now() });
+        if (!body || Object.keys(body).some(key => !['visible','navigation'].includes(key)) || typeof body.visible !== 'boolean' || (body.navigation!==undefined&&typeof body.navigation!=='boolean')) return json(response, 400, { error: 'Invalid presence update.' });
+        presence.set(session.id, { visible: body.visible, navigation:body.navigation===true, at: Date.now() });
         return json(response, 200, { ok: true });
       }
       if (request.method === 'GET' && url.pathname === '/api/display-session') return json(response, 200, session);
@@ -82,9 +93,25 @@ export function createDisplayServer({ pairing, bindAddress, snapshot, subscribe,
       else response.end();
     }
   });
-  function revoke(id) { presence.delete(id); for (const response of streams.get(id) || []) { response.write('event: revoked\ndata: {}\n\n'); response.end(); } streams.delete(id); }
+  function revoke(id) { presence.delete(id);for(const item of [...navigations.values()])if(item.displayId===id)item.finish(false); for (const response of streams.get(id) || []) { response.write('event: revoked\ndata: {}\n\n'); response.end(); } streams.delete(id); }
   async function close() { for (const id of streams.keys()) revoke(id); if (server.listening) await new Promise(resolve => server.close(resolve)); }
   const connectedIds = () => [...streams].filter(([, clients]) => [...clients].some(client => !client.destroyed)).map(([id]) => id);
   const isVisible = id => { const seen = presence.get(id); return Boolean(seen?.visible && Date.now() - seen.at < 12000 && [...(streams.get(id) || [])].some(client => !client.destroyed)); };
-  return { server, revoke, close, connectedIds, isVisible };
+  async function navigate(displayId,address,{signal,timeoutMs=3500}={}){
+    const url=websiteAddress(address);signal?.throwIfAborted();
+    const stream=[...(streams.get(displayId)||[])].filter(s=>!s.destroyed).at(-1);
+    if(!stream)throw Object.assign(Error('Open the paired Jarvis page on that screen first.'),{status:409});
+    if(navigations.size>=16)throw Object.assign(Error('Wait for the current screen commands to finish.'),{status:429});
+    const id=randomUUID();
+    return new Promise(resolve=>{
+      let finished=false;
+      const finish=delivered=>{if(finished)return;finished=true;clearTimeout(timer);signal?.removeEventListener('abort',abort);navigations.delete(id);resolve({delivered});};
+      const abort=()=>finish(false),timer=setTimeout(()=>finish(false),timeoutMs);timer.unref();
+      navigations.set(id,{displayId,finish});signal?.addEventListener('abort',abort,{once:true});
+      if(signal?.aborted)return abort();
+      try{stream.write(`event: navigate\ndata: ${JSON.stringify({id,displayId,kind:'open_url',url:url.href})}\n\n`);}catch{finish(false);}
+    });
+  }
+  const canNavigate=id=>presence.get(id)?.navigation===true;
+  return { server, revoke, close, connectedIds, isVisible, canNavigate, navigate };
 }
