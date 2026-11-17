@@ -273,7 +273,7 @@ function speakCurrent(force = false) {
   if (displayOnly || microphone.state !== 'idle' || !voiceEnabled || !voicesAvailable || !(snapshot.state === 'ready' || early) || !snapshot.answer) return;
   if (!force && (snapshot.requestId !== ownedRequestId || snapshot.requestId === spokenRequestId)) return;
   spokenRequestId = snapshot.requestId;
-  void speech.speak({ room, requestId: snapshot.requestId, voice });
+  void speech.speak({ room, requestId: snapshot.requestId, voice, full: force });
 }
 
 function render(snapshot) {
@@ -612,7 +612,7 @@ $('voice').addEventListener('change', () => {
 if ($('refresh-voices')) $('refresh-voices').addEventListener('click', () => void loadVoices());
 $('test-voice').addEventListener('click', () => { void speech.speak({ room, voice, test: true }); });
 $('hear-reply').addEventListener('click', () => {
-  if (speech.objectUrl) { speech.audio.currentTime = 0; void speech.playPrepared(); }
+  if (speech.objectUrl && !voice.startsWith('voicebox_')) { speech.audio.currentTime = 0; void speech.playPrepared(); }
   else speakCurrent(true);
 });
 $('stop-speech').addEventListener('click', () => speech.stop());

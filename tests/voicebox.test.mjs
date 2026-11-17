@@ -40,10 +40,12 @@ async function fixture({
   silent = false,
   duration = 2,
   deletedProfile = false,
+  modelLoaded = true,
   onRequest,
 } = {}) {
   const directory = await mkdtemp(path.join(tmpdir(), "jarvis-voicebox-")),
     calls = [];
+  const revision = { sampleId: "sample-one" };
   let samples = configured ? 1 : 0,
     polls = 0;
   const settings = {
@@ -86,27 +88,34 @@ async function fixture({
         return deletedProfile ? new Response(JSON.stringify({ detail: "Profile not found" }), { status: 404 }) : json({ id: "profile-jarvis", name: "Jarvis", sample_count: 0 });
       if (url.pathname === "/profiles/profile-jarvis/samples")
         return json(
-          Array.from({ length: samples }, () => ({ id: "sample-one" })),
+          Array.from({ length: samples }, () => ({ id: revision.sampleId })),
         );
       if (url.pathname === "/models/status")
         return json({
           models: [
             {
+              model_name: "chatterbox-turbo",
+              downloaded: true,
+              loaded: modelLoaded,
+              downloading: false,
+            },
+            {
               model_name: "qwen-tts-0.6B",
               downloaded: true,
-              loaded: true,
+              loaded: modelLoaded,
               downloading: false,
             },
             {
               model_name: "luxtts",
               downloaded: true,
-              loaded: true,
+              loaded: modelLoaded,
               downloading: false,
             },
           ],
         });
       if (url.pathname === "/models/download")
         return json({ status: "downloading" });
+      if (url.pathname === "/models/load") { modelLoaded = true; return json({ ok: true }); }
       if (url.pathname === "/generate")
         return json({
           id: "job-jarvis",
@@ -129,8 +138,42 @@ async function fixture({
       throw Error("Unexpected request " + url.pathname);
     },
   });
-  return { voice, directory, calls };
+  return { voice, directory, calls, revision };
 }
+
+test("repeated Voicebox phrases bypass inference and new reference samples invalidate saved audio", async () => {
+  const f = await fixture();
+  try {
+    const text = "A reusable spoken reply.";
+    const first = await f.voice.synthesize({ text });
+    const second = await f.voice.synthesize({ text });
+    assert.deepEqual(second, first);
+    assert.equal(f.voice.lastMetrics.cacheHit, true);
+    assert.equal(f.calls.filter(x => x.path === "/generate").length, 1);
+    f.revision.sampleId = "replacement-sample";
+    await f.voice.status({ fresh: true });
+    await f.voice.synthesize({ text });
+    assert.equal(f.voice.lastMetrics.cacheHit, false);
+    assert.equal(f.calls.filter(x => x.path === "/generate").length, 2);
+    await f.voice.settings({ cacheEnabled: false, conciseSpeech: true });
+    await f.voice.synthesize({ text });
+    assert.equal(f.calls.filter(x => x.path === "/generate").length, 3);
+    await assert.rejects(f.voice.settings({ engine: "unexpected" }), /valid voice speed/);
+    assert.equal((await f.voice.clearCache()).entries, 0);
+  } finally { f.voice.close(); }
+});
+
+test("Voicebox warm-up coalesces tabs, loads only the selected cached model and never generates speech", async () => {
+  const f = await fixture({ modelLoaded: false });
+  try {
+    await Promise.all([f.voice.warmup(), f.voice.warmup(), f.voice.warmup()]);
+    assert.equal(f.calls.filter(x => x.path === "/models/load").length, 1);
+    assert.equal(f.calls.find(x => x.path === "/models/load").json.model_name, "luxtts");
+    assert.equal(f.calls.filter(x => x.path === "/generate").length, 0);
+    await f.voice.settings({ keepWarm: false }); await f.voice.warmup();
+    assert.equal(f.calls.filter(x => x.path === "/models/load").length, 1);
+  } finally { f.voice.close(); }
+});
 
 test("Voicebox polls its own generation and returns playable 24 kHz audio through the existing speech interface", async () => {
   const f = await fixture({ generating: true });
@@ -179,7 +222,7 @@ test("Voicebox setup imports the prepared local sample and switches on only afte
     assert.equal(prepared.enabled, false);
     assert.equal(prepared.referenceReady, true);
     assert.deepEqual(f.calls.find((c) => c.path === "/models/download").json, {
-      model_name: "qwen-tts-0.6B",
+      model_name: "chatterbox-turbo",
     });
     assert.equal((await f.voice.listVoices()).available, false);
     const active = await f.voice.activate();

@@ -97,8 +97,8 @@ export class LocalSpeech {
       else this.setState('error', 'The spoken reply could not play. You can still read the answer.');
     }
   }
-  async speak({ room, requestId, voice, test = false }) {
-    const key = JSON.stringify([room, requestId, voice, test]);
+  async speak({ room, requestId, voice, test = false, full = false }) {
+    const key = JSON.stringify([room, requestId, voice, test, full]);
     if (this.key === key && this.objectUrl) {
       this.audio.currentTime = 0;
       return this.playPrepared();
@@ -110,12 +110,12 @@ export class LocalSpeech {
     this.setState('preparing');
     try {
       if (!test && (voice?.startsWith('pocket_') || voice?.startsWith('voicebox_')) && (window.AudioContext || window.webkitAudioContext)) {
-        await this.speakStream({ room, requestId, voice, sequence, controller, key }); return;
+        await this.speakStream({ room, requestId, voice, sequence, controller, key, full }); return;
       }
       const response = await fetch(test ? '/api/speech-test' : '/api/speech', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ room, requestId, voice }),
+        body: JSON.stringify({ room, requestId, voice, full }),
         signal: controller.signal,
       });
       if (!response.ok) {
@@ -132,7 +132,7 @@ export class LocalSpeech {
       if (sequence === this.sequence && !controller.signal.aborted) this.setState('error', error.message || 'The local voice could not be prepared.');
     } finally { if (sequence === this.sequence) this.controller = null; }
   }
-  async speakStream({ room, requestId, voice, sequence, controller, key }) {
+  async speakStream({ room, requestId, voice, sequence, controller, key, full = false }) {
     await this.enableAnalysis();
     if (sequence !== this.sequence || controller.signal.aborted) return;
     this.streamingActive = true;
@@ -142,7 +142,7 @@ export class LocalSpeech {
       if (state === 'blocked') this.setState('blocked', 'Select Hear reply to allow audio in this browser.');
       else this.setState(state);
     });
-    const response = await fetch('/api/speech-stream', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ room, requestId, voice }), signal: controller.signal });
+    const response = await fetch('/api/speech-stream', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ room, requestId, voice, full }), signal: controller.signal });
     if (!response.ok) { const problem = await response.json(); throw new Error(problem.error || 'The streamed voice could not start.'); }
     const reader = response.body.getReader(), decoder = new TextDecoder(); let buffer = '';
     const packet = line => {
@@ -173,7 +173,7 @@ export class LocalSpeech {
     finally { reader.releaseLock(); }
   }
   warm({ voice }) {
-    if (!voice?.startsWith('pocket_') || (this.warmedVoice === voice && Date.now() - this.warmedAt < 240000)) return;
+    if (!(voice?.startsWith('pocket_') || voice?.startsWith('voicebox_')) || (this.warmedVoice === voice && Date.now() - this.warmedAt < 240000)) return;
     this.warmedVoice = voice; this.warmedAt = Date.now();
     void fetch('/api/speech-warmup', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ voice }) }).then(response => { if (!response.ok) this.warmedAt = 0; }).catch(() => { this.warmedAt = 0; });
   }

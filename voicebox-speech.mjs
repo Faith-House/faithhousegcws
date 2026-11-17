@@ -2,11 +2,19 @@ import path from "node:path";
 import { readFile, writeFile, mkdir, rename } from "node:fs/promises";
 import { APP_ROOT, VOICEBOX_VOICES } from "./voice-config.mjs";
 import { pcmWave } from "./speech-stream.mjs";
+import { createSpeechCache, speechCacheKey, canonicalSpeechWave } from "./speech-cache.mjs";
 const fail = (message, status = 503) =>
   Object.assign(new Error(message), { status });
 export const VOICEBOX_VOICE = VOICEBOX_VOICES[0];
-const DEFAULT_ENGINE = "qwen";
-const modelName = (engine) => engine === "qwen" ? "qwen-tts-0.6B" : "luxtts";
+const DEFAULT_ENGINE = "chatterbox_turbo";
+const modelName = (engine) => ({ qwen: "qwen-tts-0.6B", luxtts: "luxtts", chatterbox_turbo: "chatterbox-turbo" })[engine];
+const speedSettings = settings => ({ cacheEnabled: settings?.speed?.cacheEnabled !== false, conciseSpeech: settings?.speed?.conciseSpeech !== false, keepWarm: settings?.speed?.keepWarm !== false });
+const spokenText = text => text.normalize("NFC").replace(/[‘’]/g, "'").replace(/\s+/gu, " ").trim();
+export function voiceboxVoiceRevision(profile, samples, engine) {
+  return speechCacheKey({ version: 1, engine, model: modelName(engine), profile: { id: profile?.id, type: profile?.voice_type,
+    design: profile?.design_prompt, preset: profile?.preset_voice_id, presetEngine: profile?.preset_engine, effects: profile?.effects_chain },
+    samples: (Array.isArray(samples) ? samples : []).map(x => ({ id: x.id, text: x.reference_text, file: x.audio_path, updated: x.updated_at })).sort((a, b) => String(a.id).localeCompare(String(b.id))) });
+}
 
 // Voicebox engines output several WAV rates/layouts. The HUD streams mono 24 kHz PCM.
 export function normalizeVoiceboxWave(wave) {
@@ -98,6 +106,8 @@ export function createVoiceboxSpeech({
   fetchImpl = fetch,
   timeoutMs = 300000,
   pollMs = 500,
+  now = Date.now,
+  cache = createSpeechCache({ directory: path.join(directory, "voicebox", "speech-cache") }),
 } = {}) {
   const base = new URL(baseUrl),
     configFile = path.join(directory, "voicebox.json"),
@@ -112,7 +122,7 @@ export function createVoiceboxSpeech({
     base.hash
   )
     throw fail("Voicebox must use a local loopback service address.", 400);
-  let lastMetrics;
+  let lastMetrics, cachedStatus, pendingStatus, warming;
   async function config() {
     try {
       return JSON.parse(await readFile(configFile, "utf8"));
@@ -162,8 +172,7 @@ export function createVoiceboxSpeech({
     }
     return response;
   }
-  async function status() {
-    const settings = await config();
+  async function inspect(settings) {
     try {
       const health = await (await api("health")).json();
       let profile,
@@ -200,6 +209,8 @@ export function createVoiceboxSpeech({
           ? { id: profile.id, name: profile.name, samples: sampleCount }
           : null,
         health: { status: health.status, device: health.gpu_type || "CPU" },
+        revision: profile ? voiceboxVoiceRevision(profile, samples, settings.engine || DEFAULT_ENGINE) : null,
+        performance: { ...speedSettings(settings), cache: await cache.stats().catch(() => ({ unavailable: true })) },
       };
     } catch {
       return {
@@ -209,8 +220,17 @@ export function createVoiceboxSpeech({
         enabled: settings?.enabled === true,
         referenceReady: false,
         detail: "Open Voicebox on this computer, then refresh this page.",
+        performance: { ...speedSettings(settings), cache: await cache.stats().catch(() => ({ unavailable: true })) },
       };
     }
+  }
+  async function status({ fresh = false } = {}) {
+    const settings = await config(), key = JSON.stringify(settings);
+    if (!fresh && cachedStatus?.key === key && now() - cachedStatus.at < 2000) return cachedStatus.value;
+    if (pendingStatus?.key === key) return pendingStatus.promise;
+    const promise = inspect(settings).then(value => { cachedStatus = { key, at: now(), value }; return value; });
+    pendingStatus = { key, promise };
+    try { return await promise; } finally { if (pendingStatus?.promise === promise) pendingStatus = null; }
   }
   async function listVoices() {
     const settings = await config();
@@ -323,6 +343,58 @@ export function createVoiceboxSpeech({
       controllers.delete(controller);
     }
   }
+  async function synthesize(options = {}) {
+    options.signal?.throwIfAborted();
+    const settings = await config(), info = await status();
+    if (typeof options.text !== "string" || !options.text.trim() || options.text.length > 2400) throw fail("Keep the spoken reply under 2,400 characters.", 400);
+    options = { ...options, text: spokenText(options.text) };
+    const enabled = speedSettings(settings).cacheEnabled && info.revision;
+    const key = speechCacheKey({ version: 1, service: base.href, revision: info.revision, text: options.text });
+    const began = now();
+    if (enabled) {
+      const wave = await cache.get(key, { signal: options.signal });
+      if (wave) {
+        options.signal?.throwIfAborted();
+        lastMetrics = { totalMs: now() - began, engine: "voicebox", model: settings.engine || DEFAULT_ENGINE, sampleRate: 24000, cacheHit: true };
+        options.onChunk?.(wave.subarray(44), 24000);
+        return wave;
+      }
+    }
+    const wave = await generate(settings, options);
+    lastMetrics.cacheHit = false;
+    options.signal?.throwIfAborted();
+    if (enabled) await cache.put(key, wave, { signal: options.signal }).catch(error => { if (options.signal?.aborted) throw error; });
+    cachedStatus = null;
+    return wave;
+  }
+  async function settingsUpdate(patch) {
+    if (!patch || typeof patch !== "object" || Array.isArray(patch) || Object.keys(patch).some(key => !["cacheEnabled", "conciseSpeech", "keepWarm"].includes(key) || typeof patch[key] !== "boolean")) throw fail("Use valid voice speed options.", 400);
+    const settings = await config();
+    if (!settings?.profileId) throw fail("Prepare the Jarvis voice first.", 409);
+    await save({ ...settings, speed: { ...speedSettings(settings), ...patch } });
+    cachedStatus = null;
+    return status();
+  }
+  async function warmup() {
+    if (warming) return warming;
+    warming = (async () => {
+      const settings = await config();
+      if (!settings?.enabled || !speedSettings(settings).keepWarm) return;
+      const info = await status();
+      if (!info.connected || !info.referenceReady || !info.model?.downloaded || info.model.loaded) return info;
+      await api("models/load", { method: "POST", json: { model_name: modelName(settings.engine || DEFAULT_ENGINE) }, signal: AbortSignal.timeout(120000) });
+      cachedStatus = null;
+      return status();
+    })();
+    try { return await warming; } finally { warming = null; }
+  }
+  async function remember({ text, wave }) {
+    const info = await status();
+    if (!info.revision || typeof text !== "string" || text.length > 2400 || !canonicalSpeechWave(wave)) throw fail("A valid local voice sample is required.", 400);
+    const key = speechCacheKey({ version: 1, service: base.href, revision: info.revision, text: spokenText(text) });
+    await cache.put(key, wave);
+    cachedStatus = null;
+  }
   async function prepare() {
     await api("health");
     const file = path.join(
@@ -388,12 +460,14 @@ export function createVoiceboxSpeech({
       });
     }
     settings = {
+      ...settings,
       profileId: profile.id,
       engine,
       enabled: settings?.enabled === true && settings?.profileId === profile.id,
       referenceSource: metadata.source,
     };
     await save(settings);
+    cachedStatus = null;
     await api("models/download", {
       method: "POST",
       json: { model_name: modelName(engine) },
@@ -418,6 +492,8 @@ export function createVoiceboxSpeech({
     await mkdir(path.join(directory, "voicebox"), { recursive: true });
     await writeFile(path.join(directory, "voicebox", "preview.wav"), wave);
     await save({ ...settings, enabled: true });
+    cachedStatus = null;
+    await remember({ text: "Good evening. The house systems are ready. How can I help?", wave }).catch(() => {});
     return {
       ...(await status()),
       voice: VOICEBOX_VOICE.name,
@@ -429,8 +505,12 @@ export function createVoiceboxSpeech({
     prepare,
     activate,
     listVoices,
-    warmup: async () => listVoices(),
-    synthesize: async (options) => generate(await config(), options),
+    warmup,
+    synthesize,
+    remember,
+    settings: settingsUpdate,
+    async clearCache() { const result = await cache.clear(); cachedStatus = null; return result; },
+    performance: async () => speedSettings(await config()),
     close() {
       for (const c of controllers) c.abort(Error("Voice preparation stopped."));
       controllers.clear();

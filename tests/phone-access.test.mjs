@@ -25,12 +25,14 @@ test('phone pairing binds a profile, stores only token hashes and revokes indepe
 test('phone gateway enforces pairing, assigned room/profile, owned requests, origin and central settings boundaries',async()=>{
  const dir=await mkdtemp(path.join(tmpdir(),'jarvis-phone-gateway-')),calls=[];
  const states={'bedroom-1':{state:'idle',answer:'Room one'},'bedroom-2':{state:'idle',answer:'Other room private text'}},subscribers=new Map();
- let number=0,phone,gateway;
+ let number=0,phone,gateway,speechStreamClosed=false;
  const central=http.createServer(async(req,res)=>{
   const chunks=[];for await(const c of req)chunks.push(c);const bytes=Buffer.concat(chunks);let data;
-  if(req.url.startsWith('/api/transcribe'))data={text:'What time is it?'};
-  else{const input=JSON.parse(bytes);calls.push({path:req.url,body:input});data=req.url==='/api/ask'?{requestId:'request-'+(++number)}:{ok:true};}
+  if(req.url==='/api/voices')data={available:true,defaultVoice:'voicebox_jarvis',voices:[{name:'voicebox_jarvis'}],streamingVoices:['voicebox_jarvis']};
+  else if(req.url.startsWith('/api/transcribe'))data={text:'What time is it?'};
+  else{const input=JSON.parse(bytes);calls.push({path:req.url,body:input});data=req.url==='/api/ask'?{requestId:'request-'+(++number)}:{ok:true};if(req.url==='/api/speech-stream'&&input.full===false){res.writeHead(200,{'Content-Type':'application/x-ndjson'});res.write('{"type":"format"}\n');res.on('close',()=>speechStreamClosed=true);return;}}
   if(req.url==='/api/speech'){res.writeHead(200,{'Content-Type':'audio/wav'});return res.end(Buffer.from('TEST WAVE'));}
+  if(req.url==='/api/speech-stream'){res.writeHead(200,{'Content-Type':'application/x-ndjson'});return res.end('{"type":"done"}\n');}
   res.setHeader('Content-Type','application/json');res.end(JSON.stringify(data));
  });
  await new Promise(r=>central.listen(0,'127.0.0.1',r));
@@ -51,9 +53,16 @@ test('phone gateway enforces pairing, assigned room/profile, owned requests, ori
   assert.equal(calls.at(-1).body.client.kind,'browser');assert.equal(calls.at(-1).body.client.desktop,false);
   assert.equal((await post('/api/ask',{question:'Open YouTube',client:{kind:'browser',desktop:true}})).status,400);
   assert.equal((await fetch(base+'/device-navigation.js')).status,200);
+  assert.equal((await fetch(base+'/phone-speech.js')).status,200);assert.equal((await fetch(base+'/speech.js')).status,200);
+  const voice=await(await fetch(base+'/api/voices',{headers:{Cookie:cookie}})).json();assert.equal(voice.voice,'voicebox_jarvis');assert.equal(voice.streaming,true);assert.equal(Object.hasOwn(voice,'profiles'),false);
   assert.equal((await post('/api/cancel',{requestId:'somebody-else'})).status,403);assert.equal((await post('/api/speech',{requestId:'somebody-else'})).status,403);
   assert.equal((await post('/api/cancel',{requestId:asked.requestId})).status,200);assert.equal(calls.at(-1).body.room,'bedroom-1');
   const audio=await post('/api/speech',{requestId:asked.requestId});assert.equal(audio.headers.get('content-type'),'audio/wav');assert.equal(await audio.text(),'TEST WAVE');
+  assert.equal((await post('/api/speech-stream',{requestId:'somebody-else',full:true})).status,403);
+  assert.equal((await post('/api/speech-stream',{requestId:asked.requestId,room:'bedroom-2'})).status,403);
+  const voiceStream=await post('/api/speech-stream',{requestId:asked.requestId,full:true});assert.equal(voiceStream.headers.get('content-type'),'application/x-ndjson');assert.ok((await voiceStream.text()).includes('done'));assert.equal(calls.at(-1).body.room,'bedroom-1');assert.equal(calls.at(-1).body.full,true);
+  const cancelAudio=new AbortController();const activeAudio=await fetch(base+'/api/speech-stream',{method:'POST',headers:{Cookie:cookie,'Content-Type':'application/json'},body:JSON.stringify({requestId:asked.requestId,full:false}),signal:cancelAudio.signal});const audioReader=activeAudio.body.getReader();await audioReader.read();cancelAudio.abort();await audioReader.read().catch(()=>{});
+  const deadline=Date.now()+3000;while(!speechStreamClosed&&Date.now()<deadline)await new Promise(r=>setTimeout(r,10));assert.equal(speechStreamClosed,true,'closing phone audio must cancel the upstream stream');assert.equal((await fetch(base+'/api/session',{headers:{Cookie:cookie}})).status,200);
   const stream=await fetch(base+'/api/events?room=bedroom-2',{headers:{Cookie:cookie},signal:abort.signal});reader=stream.body.getReader();const initial=new TextDecoder().decode((await reader.read()).value);assert.ok(initial.includes('Room one'));assert.equal(initial.includes('Other room private'),false);
   const id=(await pairing.list()).devices[0].id;await pairing.revoke(id);assert.equal((await fetch(base+'/api/session',{headers:{Cookie:cookie}})).status,401);
  }finally{abort.abort();await reader?.cancel().catch(()=>{});gateway.close();await pairing.close();await new Promise(r=>phone.close(r));await new Promise(r=>central.close(r));}

@@ -1,0 +1,52 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import path from 'node:path';
+import { tmpdir } from 'node:os';
+import { mkdtemp, readFile, writeFile, readdir } from 'node:fs/promises';
+import { createSpeechCache, speechCacheKey } from '../speech-cache.mjs';
+import { pcmWave } from '../speech-stream.mjs';
+
+const wave = value => pcmWave([Buffer.alloc(4800, value)]);
+test('speech cache survives restart, separates voice revisions and detects corrupted audio', async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'jarvis-audio-cache-'));
+  const cache = createSpeechCache({ directory });
+  const key = speechCacheKey({ revision: 'voice-one', text: 'A private phrase.' });
+  assert.equal(await cache.get(key), null);
+  await cache.put(key, wave(1));
+  assert.deepEqual(await createSpeechCache({ directory }).get(key), wave(1));
+  assert.equal(await cache.get(speechCacheKey({ revision: 'voice-two', text: 'A private phrase.' })), null);
+  const file = path.join(directory, (await readdir(directory))[0]), bytes = await readFile(file);
+  assert.equal(bytes.includes(Buffer.from('A private phrase')), false);
+  bytes[bytes.length - 1] ^= 0xff; await writeFile(file, bytes);
+  assert.equal(await cache.get(key), null);
+  assert.equal((await cache.stats()).entries, 0);
+  await assert.rejects(cache.get('../outside'), /Invalid speech cache key/);
+});
+test('speech cache evicts least recently used files, expires old audio and preserves unrelated files', async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'jarvis-audio-cache-limits-'));
+  let time = Date.now();
+  const cache = createSpeechCache({ directory, maxEntries: 2, ttlMs: 1000, now: () => time });
+  const keys = [1, 2, 3].map(speechCacheKey);
+  await writeFile(path.join(directory, 'keep.txt'), 'unrelated');
+  await cache.put(keys[0], wave(1)); time += 10;
+  await cache.put(keys[1], wave(2)); time += 10;
+  await cache.get(keys[0]); time += 10;
+  await cache.put(keys[2], wave(3));
+  assert.equal(await cache.get(keys[1]), null);
+  assert.deepEqual(await cache.get(keys[0]), wave(1));
+  time += 1001; assert.equal(await cache.get(keys[0]), null);
+  await cache.clear();
+  assert.equal((await cache.stats()).entries, 0);
+  assert.equal(await readFile(path.join(directory, 'keep.txt'), 'utf8'), 'unrelated');
+});
+test('speech cache respects the byte limit and cancellation prevents saved or late audio', async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'jarvis-audio-cache-cancel-'));
+  const cache = createSpeechCache({ directory, maxBytes: 6000 });
+  assert.equal(await cache.put(speechCacheKey('silent'), pcmWave([Buffer.alloc(4800)])), false);
+  await cache.put(speechCacheKey(1), wave(1)); await cache.put(speechCacheKey(2), wave(2));
+  assert.equal((await cache.stats()).entries, 1);
+  const controller = new AbortController(); controller.abort(Error('Stopped'));
+  await assert.rejects(cache.put(speechCacheKey(3), wave(3), { signal: controller.signal }), /Stopped/);
+  await assert.rejects(cache.get(speechCacheKey(2), { signal: controller.signal }), /Stopped/);
+  assert.equal((await cache.stats()).entries, 1);
+});

@@ -1,3 +1,5 @@
+import { conciseNarration, firstSpokenSentence } from './speech-policy.mjs';
+
 export function pcmWave(parts, sampleRate = 24000) {
   const pcm = Buffer.concat(parts), wave = Buffer.alloc(44 + pcm.length);
   wave.write('RIFF'); wave.writeUInt32LE(wave.length - 8, 4); wave.write('WAVEfmt ', 8);
@@ -7,8 +9,12 @@ export function pcmWave(parts, sampleRate = 24000) {
   return wave;
 }
 
-export function nextSpeechSegment(text, final = false) {
+export function nextSpeechSegment(text, final = false, { preferSentence = false } = {}) {
   if (!text.trim()) return null;
+  if (preferSentence) {
+    const first = firstSpokenSentence(text, final);
+    if (first && first.text.length <= 280) return first;
+  }
   if (final && text.length <= 260) return { text: text.trim(), consumed: text.length };
   // Wait for punctuation followed by whitespace while tokens are still arriving.
   const boundaries = [...text.matchAll(/[.!?]["')\]]*\s+/g)];
@@ -26,7 +32,7 @@ export function nextSpeechSegment(text, final = false) {
   return null;
 }
 
-export async function streamReplySpeech({ response, requestId, voice, speech, snapshot, signal, keepAlive = () => {}, cache = () => {}, waitMs = 100 }) {
+export async function streamReplySpeech({ response, requestId, voice, speech, snapshot, signal, keepAlive = () => {}, cache = () => {}, waitMs = 100, concise = false, full = false }) {
   const chunks = []; let consumed = 0, prefix = '', byteCount = 0;
   const send = data => {
     signal?.throwIfAborted();
@@ -44,7 +50,8 @@ export async function streamReplySpeech({ response, requestId, voice, speech, sn
       if (current.requestId !== requestId || !['answering', 'ready'].includes(current.state)) throw new Error('That reply was stopped or replaced.');
       const answer = current.answer || '';
       if (!answer.startsWith(prefix)) throw new Error('That reply changed while it was being spoken.');
-      const segment = nextSpeechSegment(answer.slice(consumed), current.state === 'ready');
+      const brief = conciseNarration(current, { enabled: concise, full });
+      const segment = brief ? firstSpokenSentence(answer.slice(consumed), current.state === 'ready') : nextSpeechSegment(answer.slice(consumed), current.state === 'ready', { preferSentence: voice.startsWith('voicebox_') });
       if (!segment) {
         if (current.state === 'ready') break;
         await new Promise((resolve, reject) => {
@@ -71,9 +78,14 @@ export async function streamReplySpeech({ response, requestId, voice, speech, sn
         onChunk(wave.subarray(44));
       }
       consumed += segment.consumed; prefix = answer.slice(0, consumed);
+      if (brief) break;
     }
+    signal?.throwIfAborted();
+    const latest = snapshot();
+    if (latest.requestId !== requestId || !['answering', 'ready'].includes(latest.state)) throw new Error('That reply was stopped or replaced.');
     const wave = pcmWave(chunks); cache(wave);
-    keepAlive(Math.max(22000, Math.min(180000, byteCount / 48000 * 1000 + 12000)));
+    // A brief cached reply can finish before the model. Keep its screen alive until text finishes.
+    keepAlive(latest.state === 'answering' ? undefined : Math.max(22000, Math.min(180000, byteCount / 48000 * 1000 + 12000)));
     send({ type: 'done' }); response.end();
   } catch (error) {
     if (!response.destroyed) { response.write(JSON.stringify({ type: 'error', error: signal?.aborted ? 'That spoken reply was stopped.' : error.message || 'The voice could not finish.' }) + '\n'); response.end(); }

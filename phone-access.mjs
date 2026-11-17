@@ -7,6 +7,8 @@ const publicRoot=new URL('./public/',import.meta.url);
 const assets=new Map([['/',['phone.html','text/html; charset=utf-8']],['/phone.js',['phone.js','text/javascript; charset=utf-8']],['/phone.css',['phone.css','text/css; charset=utf-8']],['/orb.js',['orb.js','text/javascript; charset=utf-8']],['/microphone.js',['microphone.js','text/javascript; charset=utf-8']],['/microphone-worklet.js',['microphone-worklet.js','text/javascript; charset=utf-8']],['/agenda.js',['agenda.js','text/javascript; charset=utf-8']],['/weather-view.js',['weather-view.js','text/javascript; charset=utf-8']],['/weather.css',['weather.css','text/css; charset=utf-8']],['/calendar.css',['calendar.css','text/css; charset=utf-8']],['/favicon.svg',['favicon.svg','image/svg+xml']]]);
 const json=(res,status,data)=>{res.writeHead(status,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end(JSON.stringify(data));};
 assets.set('/device-navigation.js',['device-navigation.js','text/javascript; charset=utf-8']);
+assets.set('/speech.js',['speech.js','text/javascript; charset=utf-8']);
+assets.set('/phone-speech.js',['phone-speech.js','text/javascript; charset=utf-8']);
 async function body(req,limit=131072){const chunks=[];let n=0;for await(const c of req){n+=c.length;if(n>limit)throw Object.assign(Error('That request is too large.'),{status:413});chunks.push(c);}return Buffer.concat(chunks);}
 async function jsonBody(req){if(req.headers['content-type']!=='application/json')throw Object.assign(Error('Use the phone app.'),{status:415});try{return JSON.parse((await body(req)).toString());}catch(error){if(error.status)throw error;throw Object.assign(Error('Enter a valid phone request.'),{status:400});}}
 const allowed=(input,keys)=>input&&typeof input==='object'&&!Array.isArray(input)&&Object.keys(input).every(k=>keys.includes(k));
@@ -38,6 +40,16 @@ export function createPhoneHandler({ pairing,bindAddress,port,centralUrl,snapsho
    const session=await pairing.authenticate(token);if(!session)return json(res,401,{error:'Pair this phone from the central computer.'});
    const profile=await profiles.get(session.profileId);if(session.profileId&&!profile)return json(res,401,{error:'This phone’s assigned profile no longer exists. Pair it again.'});
    if(req.method==='GET'&&url.pathname==='/api/session')return json(res,200,{name:session.name,room:session.room,profile:profile?{id:profile.id,name:profile.name}:null,active:modelRoute({room:session.room,profileId:session.profileId})});
+   if(req.method==='GET'&&url.pathname==='/api/voices'){
+    const response=await fetch(new URL('/api/voices',centralUrl()),{signal:AbortSignal.timeout(6000)}),info=await response.json();
+    if(!response.ok)return json(res,503,{error:'The local voice is unavailable.'});
+    const voice=info.voices?.some(x=>x.name===profile?.voice)?profile.voice:info.defaultVoice;
+    return json(res,200,{available:info.available===true,voice,streaming:info.streamingVoices?.includes(voice)===true});
+   }
+   if(req.method==='POST'&&url.pathname==='/api/speech-warmup'){
+    const input=await jsonBody(req);if(!allowed(input,['voice'])||typeof input.voice!=='string'||input.voice.length>160)return json(res,400,{error:'Choose an installed voice.'});
+    return await proxy(req,res,'/api/speech-warmup',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({voice:input.voice})},session.id);
+   }
    if(req.method==='POST'&&url.pathname==='/api/logout'){await pairing.revoke(session.id);res.setHeader('Set-Cookie','__Host-jarvis_phone=; Secure; HttpOnly; SameSite=Strict; Path=/; Max-Age=0');return json(res,200,{ok:true});}
    if(req.method==='GET'&&url.pathname==='/api/events'){
     if(!streams.has(session.id))streams.set(session.id,new Set());const current=streams.get(session.id);if(current.size>=3)return json(res,429,{error:'Close extra copies of Jarvis on this phone.'});
@@ -49,16 +61,16 @@ export function createPhoneHandler({ pairing,bindAddress,port,centralUrl,snapsho
     if(input.deviceId!==undefined&&(typeof input.deviceId!=='string'||!/^[a-zA-Z0-9_-]{8,100}$/.test(input.deviceId)))return json(res,400,{error:'Use a valid browser device identifier.'});
     const reply=await fetch(new URL('/api/ask',centralUrl()),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({question:input.question,viewContext:input.viewContext,room:session.room,profileId:session.profileId||undefined,client:{kind:'browser',id:input.deviceId||session.id,desktop:false}}),signal:AbortSignal.timeout(5000)});const data=await reply.json();if(reply.ok)owned.set(session.id,data.requestId);return json(res,reply.status,data);
    }
-   if(req.method==='POST'&&['/api/cancel','/api/speech'].includes(url.pathname)){
-    const input=await jsonBody(req);if(!allowed(input,url.pathname==='/api/cancel'?['requestId']:['requestId','voice'])||typeof input.requestId!=='string'||owned.get(session.id)!==input.requestId)return json(res,403,{error:'This phone can only operate its own latest request.'});
-    return proxy(req,res,url.pathname,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...input,room:session.room})},session.id);
+   if(req.method==='POST'&&['/api/cancel','/api/speech','/api/speech-stream'].includes(url.pathname)){
+    const input=await jsonBody(req);if(!allowed(input,url.pathname==='/api/cancel'?['requestId']:['requestId','voice','full'])||typeof input.requestId!=='string'||owned.get(session.id)!==input.requestId)return json(res,403,{error:'This phone can only operate its own latest request.'});
+    return await proxy(req,res,url.pathname,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...input,room:session.room})},session.id);
    }
    if(req.method==='POST'&&url.pathname==='/api/transcribe'){
     if(req.headers['content-type']!=='audio/wav')return json(res,415,{error:'Record audio using Jarvis.'});
-    const wave=await body(req,640044);return proxy(req,res,'/api/transcribe?room='+encodeURIComponent(session.room),{method:'POST',headers:{'Content-Type':'audio/wav'},body:wave},session.id);
+    const wave=await body(req,640044);return await proxy(req,res,'/api/transcribe?room='+encodeURIComponent(session.room),{method:'POST',headers:{'Content-Type':'audio/wav'},body:wave},session.id);
    }
    return json(res,403,{error:'This phone can ask Jarvis in its assigned room. Central settings are available only on the computer.'});
-  }catch(error){if(!res.headersSent)json(res,error.status||502,{error:error.status?error.message.replace(/\bTV\b|\bdisplay\b/g,'phone'):'The phone connection could not finish that request.'});else res.end();}
+  }catch(error){if(res.destroyed)return;if(!res.headersSent)json(res,error.status||502,{error:error.status?error.message.replace(/\bTV\b|\bdisplay\b/g,'phone'):'The phone connection could not finish that request.'});else res.end();}
  };
  return{handler,revoke,close:()=>{for(const id of streams.keys())revoke(id);for(const c of controllers.keys())c.abort();}};
 }

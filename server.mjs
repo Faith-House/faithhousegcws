@@ -36,6 +36,7 @@ import { createReminders } from './reminders.mjs';
 import { createToolAgent, isToolRequest, isCompoundToolRequest } from './tool-agent.mjs';
 import { createHouseTools } from './house-tools.mjs';
 import { streamReplySpeech } from './speech-stream.mjs';
+import { spokenReplyText } from './speech-policy.mjs';
 import { readStartupStatus } from './startup-status.mjs';
 import { projectId } from './supervisor.mjs';
 import { createWeather, isWeatherRequest } from './weather.mjs';
@@ -106,7 +107,7 @@ const assets = new Map([
   ['/timer-chime.wav', ['timer-chime.wav', 'audio/wav']],
   ['/favicon.svg', ['favicon.svg', 'image/svg+xml']],
 ]);
-const systemPrompt = 'You are Jarvis, the local household assistant. Your name is Jarvis; profile names belong to the people you assist, never to you. Answer the current question directly. Use earlier conversation only when relevant and keep follow-ups consistent. Do not repeat an earlier greeting or answer when the topic changes. Speak naturally in one to three short sentences of plain text, without Markdown or emoji unless requested. For a casual preference question, you may make a conversational choice without claiming human feelings. Use supplied speaker matches and profile preferences; never invent recognition or personal information. Public internet search is available through the search_web tool, with snippet-based local summaries and visible sources. Only claim a web lookup when real search results were supplied. The Workbench supports explicitly saved profile facts, managed files, background research and code proposals, routines, Windows/browser controls, and Discord messages. Workbench commands execute directly when its approval setting is off. Only claim execution from real tool results; pending review is not execution. Local vision requires a selected installed vision model. Weather is connected. Device controls depend on Home Assistant setup; router monitoring and telephone calls are not connected. Never pretend to carry out an unavailable action.';
+const systemPrompt = 'You are Jarvis, the local household assistant. Your name is Jarvis; profile names belong to the people you assist, never to you. Answer the current question directly. Start with one short sentence that answers it, then add detail if useful. Use earlier conversation only when relevant and keep follow-ups consistent. Do not repeat an earlier greeting or answer when the topic changes. Speak naturally in one to three short sentences of plain text, without Markdown or emoji unless requested. For a casual preference question, you may make a conversational choice without claiming human feelings. Use supplied speaker matches and profile preferences; never invent recognition or personal information. Public internet search is available through the search_web tool, with snippet-based local summaries and visible sources. Only claim a web lookup when real search results were supplied. The Workbench supports explicitly saved profile facts, managed files, background research and code proposals, routines, Windows/browser controls, and Discord messages. Workbench commands execute directly when its approval setting is off. Only claim execution from real tool results; pending review is not execution. Local vision requires a selected installed vision model. Weather is connected. Device controls depend on Home Assistant setup; router monitoring and telephone calls are not connected. Never pretend to carry out an unavailable action.';
 
 function json(response, status, body) {
   response.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
@@ -674,6 +675,16 @@ export function createJarvisServer({ model = process.env.JARVIS_MODEL || 'qwen3:
       if(request.method==='POST'&&url.pathname==='/api/workbench/settings')return json(response,200,await workbench.settings(await readJson(request)));
       if(request.method==='POST'&&url.pathname==='/api/workbench/approve'){const body=await readJson(request);return json(response,200,await workbench.approvals.resolve(body.id,body.allow));}
       if(request.method==='GET'&&url.pathname==='/api/voicebox')return json(response,200,speech.voicebox?await speech.voicebox.status():{connected:false,detail:'Restart Jarvis to load the Voicebox adapter.'});
+      if(request.method==='POST'&&url.pathname==='/api/voicebox/settings'){
+        const patch=await readJson(request);
+        if(!speech.voicebox)return json(response,503,{error:'Restart Jarvis to load its Voicebox adapter.'});
+        return json(response,200,await speech.voicebox.settings(patch));
+      }
+      if(request.method==='POST'&&url.pathname==='/api/voicebox/cache/clear'){
+        await readJson(request);
+        if(!speech.voicebox)return json(response,503,{error:'Restart Jarvis to load its Voicebox adapter.'});
+        return json(response,200,await speech.voicebox.clearCache());
+      }
       if(request.method==='GET'&&url.pathname==='/api/voicebox/preview'){
         try { const wave=await readFile(`${actionsOptions.dataDirectory||`${APP_ROOT}/private`}/voicebox/preview.wav`);response.writeHead(200,{'Content-Type':'audio/wav','Cache-Control':'no-store'});return response.end(wave); }
         catch{return json(response,404,{error:'Test the Voicebox voice before playing its preview.'});}
@@ -940,6 +951,8 @@ export function createJarvisServer({ model = process.env.JARVIS_MODEL || 'qwen3:
         }
         const isTest = url.pathname === '/api/speech-test';
         const isStreaming = url.pathname === '/api/speech-stream';
+        if (body.full !== undefined && typeof body.full !== 'boolean') return json(response,400,{error:'Use a valid full-reply option.'});
+        const full = body.full === true;
         const current = state.get(room);
         if (!isTest && (typeof body.requestId !== 'string' || current.requestId !== body.requestId || !(isStreaming ? ['answering', 'ready'] : ['ready']).includes(current.state))) {
           return json(response, 409, { error: 'That answer has already been cleared. Ask another question.' });
@@ -953,7 +966,9 @@ export function createJarvisServer({ model = process.env.JARVIS_MODEL || 'qwen3:
         const requestId = isTest ? 'voice-test' : body.requestId;
         const voiceTimeout = voice.startsWith('voicebox_') ? 300000 : 180000;
         if (!isTest) scheduleExpiry(room, requestId, voice.startsWith('voicebox_') ? voiceTimeout + 15000 : 90000);
-        const key = JSON.stringify([room, requestId, voice]);
+        const concise = voice.startsWith('voicebox_') && (await speech.voicebox?.performance())?.conciseSpeech !== false;
+        const voiceRevision = voice.startsWith('voicebox_') ? (await speech.voicebox?.status())?.revision : null;
+        const key = JSON.stringify([room, requestId, voice, concise, full, voiceRevision]);
         const controller = new AbortController();
         speechControllers.get(room).add(controller);
         response.on('close', () => { if (!response.writableEnded) controller.abort(new Error('Speech cancelled.')); });
@@ -961,13 +976,13 @@ export function createJarvisServer({ model = process.env.JARVIS_MODEL || 'qwen3:
           if (isStreaming) {
             const timeout = setTimeout(() => controller.abort(new Error('Speech stream timed out.')), voiceTimeout); timeout.unref();
             try {
-              await streamReplySpeech({ response, requestId, voice, speech, snapshot: () => state.get(room), signal: controller.signal, keepAlive: (delay = voiceTimeout + 15000) => scheduleExpiry(room, requestId, delay), cache: audio => { speechCache.set(key, { room, audio }); while (speechCache.size > 4) speechCache.delete(speechCache.keys().next().value); } });
+              await streamReplySpeech({ response, requestId, voice, speech, concise, full, snapshot: () => state.get(room), signal: controller.signal, keepAlive: (delay = voiceTimeout + 15000) => scheduleExpiry(room, requestId, delay), cache: audio => { speechCache.set(key, { room, audio }); while (speechCache.size > 4) speechCache.delete(speechCache.keys().next().value); } });
             } finally { clearTimeout(timeout); }
             return;
           }
           let audio = speechCache.get(key)?.audio;
           if (!audio) {
-            const text = isTest ? "Hello. I'm Jarvis. I'm ready whenever you need me." : current.answer;
+            const text = isTest ? (voice.startsWith('voicebox_') ? "Good evening. The house systems are ready. How can I help?" : "Hello. I'm Jarvis. I'm ready whenever you need me.") : spokenReplyText(current, { concise, full });
             audio = await speech.synthesize({ text, voice, signal: controller.signal });
             if (controller.signal.aborted || (!isTest && (state.get(room).requestId !== requestId || state.get(room).state !== 'ready'))) {
               return json(response, 409, { error: 'That answer has already been cleared. Ask another question.' });

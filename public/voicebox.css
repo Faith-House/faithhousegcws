@@ -12,4 +12,6 @@ button:focus-visible, a:focus-visible { outline: 2px solid #ffac60; outline-offs
 audio { width: 100%; margin-top: 16px; }
 .muted { font-size: 13px; }
 footer { margin-top: 32px; }
+label { display: block; line-height: 1.6; margin: 14px 0; }
+input[type="checkbox"] { accent-color: #ffac60; margin-right: 8px; }
 @media (max-width: 480px) { body { margin-top: 24px; padding: 20px; } .card { padding: 20px; } }

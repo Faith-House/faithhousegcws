@@ -31,7 +31,7 @@ export function createLocalSpeech({ kokoro = createNeuralSpeech(), pocket = crea
     finally { busy = false; }
   }
   async function warmup({ voice = 'pocket_peter' } = {}) {
-    if (!busy && voice.startsWith('voicebox_')) return voicebox.warmup({voice});
+    if (!busy && voice.startsWith('voicebox_')) { if (active && active !== voicebox) active.close(); active = voicebox; return voicebox.warmup({voice}); }
     if (busy || !voice.startsWith('pocket_')) return;
     const info = await pocket.listVoices(); if (!info.available) return;
     if (active && active !== pocket) active.close(); active = pocket;
