@@ -10,6 +10,7 @@ import { createJobs } from "./workbench-jobs.mjs";
 import { browserIntent } from "./browser-intents.mjs";
 import { computerIntent } from "./computer-intents.mjs";
 import { appIntent } from "./navigation-intents.mjs";
+import { clientDevice, websiteNavigation } from "./device-actions.mjs";
 
 const hash = (data) => createHash("sha256").update(data).digest("hex");
 const confirmed = (summary, data = {}) => ({
@@ -179,6 +180,7 @@ export function createWorkbench({
     return {
       profileId: profile?.id || null,
       room: input.room,
+      client: clientDevice(input.client),
       ...(input.signal instanceof AbortSignal ? { signal: input.signal } : {}),
     };
   }
@@ -630,6 +632,14 @@ export function createWorkbench({
       );
     }
     if (action === "desktop") {
+      if (
+        context.client &&
+        (context.client.kind !== "browser" || !context.client.desktop)
+      )
+        throw problem(
+          "This device’s browser can open websites, but controlling its installed apps needs a local Jarvis computer connection. Nothing was opened on the central computer.",
+          409,
+        );
       if (!(await store.read()).settings.desktopEnabled)
         throw problem(
           "Enable computer controls in Workbench settings first.",
@@ -654,6 +664,19 @@ export function createWorkbench({
           "Enable the managed browser in Workbench settings first.",
           409,
         );
+      if (context.client) {
+        if (args.operation !== "open")
+          throw problem(
+            "That website is on your device. Reading or controlling its page needs a browser companion on that device.",
+            409,
+          );
+        return staged(
+          context,
+          "Open website on requesting device",
+          { url: args.url },
+          () => Promise.resolve(websiteNavigation(context.client, args.url)),
+        );
+      }
       const sessionOwner = browserOwner(context);
       if (["read", "screenshot"].includes(args.operation)) {
         if (!browser.status().sessions.includes(sessionOwner))
@@ -920,6 +943,8 @@ export function createWorkbench({
       !computing &&
       launching?.type === "open" &&
       desktop.resolveApp &&
+      (!context.client ||
+        (context.client.kind === "browser" && context.client.desktop)) &&
       (!browsing ||
         /^(?:spotify|discord|netflix|outlook|chatgpt)$/i.test(launching.app))
     ) {

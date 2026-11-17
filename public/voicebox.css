@@ -1,0 +1,15 @@
+html { color-scheme: dark; background: #090806; font-family: "Segoe UI", sans-serif; color: #f1e6dc; }
+body { max-width: 760px; margin: 8vh auto; padding: 24px; }
+a { color: #ffac60; }
+h1 { font-size: 36px; font-weight: 450; margin-bottom: 8px; }
+.eyebrow { color: #b48c68; font-size: 11px; letter-spacing: .2em; }
+.card { border: 1px solid #51331e; background: #17110ccc; border-radius: 16px; padding: 24px; margin: 24px 0; }
+p { line-height: 1.6; color: #baa99a; }
+button { border: 1px solid #995421; background: #713913; color: #ffe7d1; border-radius: 8px; padding: 12px 16px; margin: 8px 8px 8px 0; cursor: pointer; }
+button:disabled { opacity: .4; cursor: wait; }
+button:focus-visible, a:focus-visible { outline: 2px solid #ffac60; outline-offset: 3px; }
+#message { white-space: pre-wrap; color: #ffbe88; }
+audio { width: 100%; margin-top: 16px; }
+.muted { font-size: 13px; }
+footer { margin-top: 32px; }
+@media (max-width: 480px) { body { margin-top: 24px; padding: 20px; } .card { padding: 20px; } }

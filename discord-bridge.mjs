@@ -1,5 +1,5 @@
 const fail=(message,status=409)=>Object.assign(new Error(message),{status});
-export function createDiscordBridge({baseUrl,fetchImpl=fetch,timeoutMs=200000}={}){
+export function createDiscordBridge({baseUrl,fetchImpl=fetch,timeoutMs=200000,client=null}={}){
  const active=new Map();
  async function ask(userId,binding,question,{signal}={}){
   if(active.has(userId))throw fail('You already have a Jarvis request running. Use /jarvis stop first.');
@@ -7,11 +7,11 @@ export function createDiscordBridge({baseUrl,fetchImpl=fetch,timeoutMs=200000}={
   const job={controller,binding,requestId:null};active.set(userId,job);
   try{
    const events=await fetchImpl(new URL('/api/events?room='+encodeURIComponent(binding.room),baseUrl()),{signal:combined});if(!events.ok)throw fail('Jarvis could not open this room’s response stream.',502);
-   const accepted=await fetchImpl(new URL('/api/ask',baseUrl()),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({room:binding.room,profileId:binding.profileId,question}),signal:combined});
+   const accepted=await fetchImpl(new URL('/api/ask',baseUrl()),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({room:binding.room,profileId:binding.profileId,question,client:binding.client||client}),signal:combined});
    const reply=await accepted.json();if(!accepted.ok)throw fail(reply.error||'Jarvis could not accept that request.',accepted.status);
    job.requestId=reply.requestId;let buffer='',decoder=new TextDecoder();
    for await(const chunk of events.body){buffer+=decoder.decode(chunk,{stream:true});if(buffer.length>262144)throw fail('The reply stream was too large.',502);let boundary;
-    while((boundary=buffer.indexOf('\n\n'))>=0){const packet=buffer.slice(0,boundary);buffer=buffer.slice(boundary+2);if(!packet.startsWith('data: '))continue;const state=JSON.parse(packet.slice(6));if(state.requestId!==job.requestId)continue;if(state.state==='error')throw fail(state.error||'Jarvis could not answer.',502);if(state.state==='ready')return{answer:state.answer||'Done.',room:binding.room,requestId:state.requestId,profileId:binding.profileId,resultKind:state.resultKind||null};}
+    while((boundary=buffer.indexOf('\n\n'))>=0){const packet=buffer.slice(0,boundary);buffer=buffer.slice(boundary+2);if(!packet.startsWith('data: '))continue;const state=JSON.parse(packet.slice(6));if(state.requestId!==job.requestId)continue;if(state.state==='error')throw fail(state.error||'Jarvis could not answer.',502);if(state.state==='ready')return{answer:state.answer||'Done.',room:binding.room,requestId:state.requestId,profileId:binding.profileId,resultKind:state.resultKind||null,deviceActions:state.deviceActions||[]};}
    }
    throw fail('Jarvis stopped before returning a reply.',502);
   }finally{controller.abort();if(active.get(userId)===job)active.delete(userId);}

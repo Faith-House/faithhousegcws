@@ -48,6 +48,9 @@ test('phone gateway enforces pairing, assigned room/profile, owned requests, ori
   assert.equal((await post('/api/ask',{question:'Hello'},{Origin:'https://outside.example'})).status,403);
   assert.equal((await post('/api/phones/revoke',{id:'anything'})).status,403);assert.equal((await post('/api/models',{codingModel:'anything'})).status,403);assert.equal((await fetch(base+'/api/profiles',{headers:{Cookie:cookie}})).status,403);
   const asked=await(await post('/api/ask',{question:'What time is it?'})).json();assert.equal(calls.at(-1).body.room,'bedroom-1');assert.equal(calls.at(-1).body.profileId,'cooper');
+  assert.equal(calls.at(-1).body.client.kind,'browser');assert.equal(calls.at(-1).body.client.desktop,false);
+  assert.equal((await post('/api/ask',{question:'Open YouTube',client:{kind:'browser',desktop:true}})).status,400);
+  assert.equal((await fetch(base+'/device-navigation.js')).status,200);
   assert.equal((await post('/api/cancel',{requestId:'somebody-else'})).status,403);assert.equal((await post('/api/speech',{requestId:'somebody-else'})).status,403);
   assert.equal((await post('/api/cancel',{requestId:asked.requestId})).status,200);assert.equal(calls.at(-1).body.room,'bedroom-1');
   const audio=await post('/api/speech',{requestId:asked.requestId});assert.equal(audio.headers.get('content-type'),'audio/wav');assert.equal(await audio.text(),'TEST WAVE');

@@ -4,19 +4,19 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createNeuralSpeech } from './neural-speech.mjs';
 import { createPocketSpeech } from './pocket-speech.mjs';
+import { createVoiceboxSpeech } from './voicebox-speech.mjs';
 
 const workerPath = fileURLToPath(new URL('./local-speech.ps1', import.meta.url));
 
-export function createLocalSpeech() {
+export function createLocalSpeech({ kokoro = createNeuralSpeech(), pocket = createPocketSpeech(), voicebox = createVoiceboxSpeech() } = {}) {
   if (process.env.JARVIS_VOICE_ENGINE === 'windows') return createWindowsSpeech();
-  const kokoro = createNeuralSpeech(), pocket = createPocketSpeech();
   let active, busy = false;
   async function listVoices() {
-    const [a, b] = await Promise.all([kokoro.listVoices(), pocket.listVoices()]);
-    const voices = [...(a.available ? a.voices : []), ...(b.available ? b.voices : [])];
+    const [a, b, c] = await Promise.all([kokoro.listVoices(), pocket.listVoices(), voicebox.listVoices()]);
+    const voices = [...(a.available ? a.voices : []), ...(b.available ? b.voices : []), ...(c.available ? c.voices : [])];
     const preferred = process.env.JARVIS_SPEECH_VOICE;
-    const defaultVoice = voices.find(v => v.name === preferred)?.name || (a.available ? a.defaultVoice : b.defaultVoice);
-    return { available: voices.length > 0, voices, defaultVoice, engine: 'local-neural', localOnly: true, protocolVersion: 2, streamingVoices: b.available ? b.voices.map(v => v.name) : [] };
+    const defaultVoice = c.available ? c.defaultVoice : voices.find(v => v.name === preferred)?.name || (a.available ? a.defaultVoice : b.defaultVoice);
+    return { available: voices.length > 0, voices, defaultVoice, engine: c.available ? 'voicebox' : 'local-neural', localOnly: true, protocolVersion: 2, streamingVoices: [...(b.available ? b.voices.map(v => v.name) : []), ...(c.available ? c.voices.map(v => v.name) : [])] };
   }
   async function synthesize(options) {
     if (busy) throw Object.assign(new Error('The voice is preparing another reply.'), { status: 429 });
@@ -24,19 +24,20 @@ export function createLocalSpeech() {
     try {
       const info = await listVoices(), voice = options.voice || info.defaultVoice;
       if (!info.voices.some(v => v.name === voice)) throw Object.assign(new Error('Choose an installed local voice.'), { status: 400 });
-      const engine = voice.startsWith('pocket_') ? pocket : kokoro;
+      const engine = voice.startsWith('voicebox_') ? voicebox : voice.startsWith('pocket_') ? pocket : kokoro;
       if (active && active !== engine) active.close(); active = engine;
       return await engine.synthesize({ ...options, voice });
     }
     finally { busy = false; }
   }
   async function warmup({ voice = 'pocket_peter' } = {}) {
+    if (!busy && voice.startsWith('voicebox_')) return voicebox.warmup({voice});
     if (busy || !voice.startsWith('pocket_')) return;
     const info = await pocket.listVoices(); if (!info.available) return;
     if (active && active !== pocket) active.close(); active = pocket;
     return pocket.warmup({ voice });
   }
-  return { listVoices, synthesize, warmup, close() { kokoro.close(); pocket.close(); }, get lastMetrics() { return active?.lastMetrics; } };
+  return { listVoices, synthesize, warmup, voicebox, close() { kokoro.close(); pocket.close(); voicebox.close(); }, get lastMetrics() { return active?.lastMetrics; } };
 }
 
 export function createWindowsSpeech({ executable = process.env.JARVIS_POWERSHELL || path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'), timeoutMs = 20000 } = {}) {

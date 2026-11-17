@@ -35,7 +35,7 @@ export function navigationRequest(question) {
   const browserName = "(?:(?:google )?chrome|(?:microsoft )?edge|firefox)";
   const suffix = target.match(
     new RegExp(
-      "\\s+(?:in|using|with|on) (?:a |the |my )?(" +
+      "\\s+(?:in|using|with|on|and) (?:a |the |my )?(" +
         browserName +
         ")(?: browser)?[?!.]*$",
       "i",

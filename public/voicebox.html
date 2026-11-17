@@ -1,0 +1,9 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Jarvis · Voicebox</title>
+<link rel="stylesheet" href="/voicebox.css">
+<script type="module" src="/voicebox.js"></script></head><body>
+<a href="/">← Jarvis</a><p class="eyebrow">LOCAL VOICE</p><h1>Voicebox</h1><p>A Jarvis voice built from the prepared Marvel reference. Speech generation runs on this computer.</p>
+<section class="card"><h2 id="status">Checking Voicebox…</h2><p id="detail"></p><p class="muted">Open the installed Voicebox app from the Windows Start menu and keep it running. Prepare imports the eight-second reference and downloads the local voice model. Test and use generates a real preview before switching Jarvis’s voice.</p>
+<button id="refresh">Refresh connection</button><button id="prepare">Prepare Jarvis voice</button><button id="activate">Test and use this voice</button><p id="message" role="status"></p><audio id="preview" controls hidden></audio></section>
+<p class="muted">This uses Qwen TTS 0.6B for the reference voice. CPU generation can take a minute or longer on this laptop. Text appears first; Stop speaking cancels generation. Peter remains available in the voice menu. The current voice remains selected until a playable preview succeeds. This setup changes the spoken voice, leaving roommate voice recognition intact.</p><footer><a href="https://www.youtube.com/watch?v=6i5hho2aD-E" target="_blank" rel="noopener">Official Marvel reference</a> · <a href="https://github.com/jamiepine/voicebox" target="_blank" rel="noopener">Voicebox project</a></footer>
+</body></html>

@@ -6,6 +6,7 @@ import { privateIPv4 } from './samsung-launcher.mjs';
 const publicRoot=new URL('./public/',import.meta.url);
 const assets=new Map([['/',['phone.html','text/html; charset=utf-8']],['/phone.js',['phone.js','text/javascript; charset=utf-8']],['/phone.css',['phone.css','text/css; charset=utf-8']],['/orb.js',['orb.js','text/javascript; charset=utf-8']],['/microphone.js',['microphone.js','text/javascript; charset=utf-8']],['/microphone-worklet.js',['microphone-worklet.js','text/javascript; charset=utf-8']],['/agenda.js',['agenda.js','text/javascript; charset=utf-8']],['/weather-view.js',['weather-view.js','text/javascript; charset=utf-8']],['/weather.css',['weather.css','text/css; charset=utf-8']],['/calendar.css',['calendar.css','text/css; charset=utf-8']],['/favicon.svg',['favicon.svg','image/svg+xml']]]);
 const json=(res,status,data)=>{res.writeHead(status,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end(JSON.stringify(data));};
+assets.set('/device-navigation.js',['device-navigation.js','text/javascript; charset=utf-8']);
 async function body(req,limit=131072){const chunks=[];let n=0;for await(const c of req){n+=c.length;if(n>limit)throw Object.assign(Error('That request is too large.'),{status:413});chunks.push(c);}return Buffer.concat(chunks);}
 async function jsonBody(req){if(req.headers['content-type']!=='application/json')throw Object.assign(Error('Use the phone app.'),{status:415});try{return JSON.parse((await body(req)).toString());}catch(error){if(error.status)throw error;throw Object.assign(Error('Enter a valid phone request.'),{status:400});}}
 const allowed=(input,keys)=>input&&typeof input==='object'&&!Array.isArray(input)&&Object.keys(input).every(k=>keys.includes(k));
@@ -44,8 +45,9 @@ export function createPhoneHandler({ pairing,bindAddress,port,centralUrl,snapsho
     const timer=setInterval(async()=>{if(!await pairing.authenticate(token))return revoke(session.id);if(!res.destroyed)res.write(': keep-alive\n\n');},15000);timer.unref();res.on('close',()=>{clearInterval(timer);remove();current.delete(res);if(!current.size)streams.delete(session.id);});return;
    }
    if(req.method==='POST'&&url.pathname==='/api/ask'){
-    const input=await jsonBody(req);if(!allowed(input,['question','viewContext']))return json(res,400,{error:'This phone uses its assigned room and profile.'});
-    const reply=await fetch(new URL('/api/ask',centralUrl()),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...input,room:session.room,profileId:session.profileId||undefined}),signal:AbortSignal.timeout(5000)});const data=await reply.json();if(reply.ok)owned.set(session.id,data.requestId);return json(res,reply.status,data);
+    const input=await jsonBody(req);if(!allowed(input,['question','viewContext','deviceId']))return json(res,400,{error:'This phone uses its assigned room and profile.'});
+    if(input.deviceId!==undefined&&(typeof input.deviceId!=='string'||!/^[a-zA-Z0-9_-]{8,100}$/.test(input.deviceId)))return json(res,400,{error:'Use a valid browser device identifier.'});
+    const reply=await fetch(new URL('/api/ask',centralUrl()),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({question:input.question,viewContext:input.viewContext,room:session.room,profileId:session.profileId||undefined,client:{kind:'browser',id:input.deviceId||session.id,desktop:false}}),signal:AbortSignal.timeout(5000)});const data=await reply.json();if(reply.ok)owned.set(session.id,data.requestId);return json(res,reply.status,data);
    }
    if(req.method==='POST'&&['/api/cancel','/api/speech'].includes(url.pathname)){
     const input=await jsonBody(req);if(!allowed(input,url.pathname==='/api/cancel'?['requestId']:['requestId','voice'])||typeof input.requestId!=='string'||owned.get(session.id)!==input.requestId)return json(res,403,{error:'This phone can only operate its own latest request.'});

@@ -16,3 +16,5 @@ export const NEURAL_VOICES = [
   ...POCKET_VOICES,
 ];
 export const DEFAULT_NEURAL_VOICE = 'bm_george';
+export const VOICEBOX_VOICES = [{ name: 'voicebox_jarvis', label: 'Jarvis · Voicebox', culture: 'en-GB' }];
+export const PROFILE_VOICES = [...NEURAL_VOICES, ...VOICEBOX_VOICES];

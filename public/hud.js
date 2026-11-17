@@ -12,6 +12,7 @@ import { LocalMicrophone } from './microphone.js';
 import { WakeWordListener } from './wakeword.js';
 import { isStopReply, stripWakePhrase, wakeShouldPause } from './interruptions.js';
 import { createProfileSelection } from './profile-selection.js';
+import { createDeviceNavigator } from './device-navigation.js';
 
 const $ = id => document.getElementById(id);
 const orb = new JarvisOrb($('orb'));
@@ -45,6 +46,7 @@ let activeModelRoute = { mode: 'normal', maxInputChars: 600 };
 let modelRefreshEpoch = 0;
 let selectedProfileId = '';
 const profileSelection = createProfileSelection();
+const deviceNavigator = createDeviceNavigator({onError:message=>{formError(message);openComposer();}});
 const profileControls = () => [$('profile'), $('dashboard-profile')].filter(Boolean);
 let globalSpeechMuted;
 let speakerNotice = '';
@@ -267,7 +269,7 @@ function syncWake() {
 
 function speakCurrent(force = false) {
   const snapshot = lastSnapshot;
-  const early = voice.startsWith('pocket_') && snapshot.state === 'answering' && snapshot.answer?.length >= 25 && /[.!?]\s/.test(snapshot.answer);
+  const early = (voice.startsWith('pocket_') || voice.startsWith('voicebox_')) && snapshot.state === 'answering' && snapshot.answer?.length >= 25 && /[.!?]\s/.test(snapshot.answer);
   if (displayOnly || microphone.state !== 'idle' || !voiceEnabled || !voicesAvailable || !(snapshot.state === 'ready' || early) || !snapshot.answer) return;
   if (!force && (snapshot.requestId !== ownedRequestId || snapshot.requestId === spokenRequestId)) return;
   spokenRequestId = snapshot.requestId;
@@ -294,7 +296,7 @@ function render(snapshot) {
     if (speech.state !== 'idle' || speech.objectUrl) speech.stop();
   }
   updateVisuals();
-  speakCurrent();
+  if (!deviceNavigator.apply(snapshot, ownedRequestId)) speakCurrent();
 }
 
 async function loadVoices() {
@@ -305,7 +307,7 @@ async function loadVoices() {
     voicesAvailable = info.available && Array.isArray(info.voices) && info.voices.length > 0;
     if (!voicesAvailable) throw new Error('No local voice is installed on this computer.');
     const previousDefault = readSetting('jarvis.voice.defaultSeen', '');
-    if (previousDefault !== info.defaultVoice && (!voice || voice === 'bm_george')) {
+    if (previousDefault !== info.defaultVoice && (info.engine === 'voicebox' || !voice || voice === 'bm_george')) {
       voice = info.defaultVoice;
       saveSetting('jarvis.voice', voice);
     }
@@ -374,6 +376,7 @@ function applyProfile(id, persist = true) {
     const url = new URL(location.href); url.searchParams.delete('profile'); url.searchParams.set('profileId', selectedProfileId); history.replaceState(null, '', url);
   }
   voice = profile?.voice || readSetting('jarvis.voice', 'bm_george');
+  if (voicesAvailable && !Array.from($('voice').options).some(option => option.value === voice)) voice = $('voice').value;
   voiceEnabled = !globalSpeechMuted && (profile?.spokenReplies ?? true);
   $('voice-enabled').checked = voiceEnabled;
   if (Array.from($('voice').options).some(option => option.value === voice)) $('voice').value = voice;
@@ -413,7 +416,7 @@ if (!displayOnly) void refreshProfiles();
 window.addEventListener('focus', () => { void refreshProfiles(); });
 document.addEventListener('visibilitychange', () => { if (!document.hidden) void refreshProfiles(); });
 window.addEventListener('storage', event => {
-  if (event.key === 'jarvis.profilesUpdated') void refreshProfiles();
+  if (event.key === 'jarvis.profilesUpdated') { void refreshProfiles(); void loadVoices(); }
   if (event.key === 'jarvis.profile' && !busy && microphone.state === 'idle') {
     profileSelection.select(event.newValue); pendingSpeakerToken = null; applyProfile(profileSelection.current().profileId, false);
   }
@@ -516,7 +519,7 @@ async function submitQuestion(question) {
   const epoch = questionEpoch;
   $('send').disabled = true;
   try {
-    const accepting = post('/api/ask', { room, question, viewContext: document.body.dataset.view, ...profileSelection.current(), speakerToken: pendingSpeakerToken });
+    const accepting = post('/api/ask', { room, question, viewContext: document.body.dataset.view, ...profileSelection.current(), speakerToken: pendingSpeakerToken, client: deviceNavigator.client });
     pendingAsk = accepting;
     const accepted = await accepting;
     if (epoch !== questionEpoch) return;
@@ -526,7 +529,7 @@ async function submitQuestion(question) {
     $('question').value = '';
     $('question').style.height = 'auto';
     closeComposer();
-    speakCurrent();
+    if (!deviceNavigator.apply(lastSnapshot, ownedRequestId)) speakCurrent();
   } catch (error) { formError(error.message); openComposer(); }
   finally { pendingAsk = null; submitting = false; updateVisuals(); }
 }

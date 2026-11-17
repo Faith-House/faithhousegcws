@@ -109,7 +109,7 @@ export class LocalSpeech {
     this.controller = controller;
     this.setState('preparing');
     try {
-      if (!test && voice?.startsWith('pocket_') && (window.AudioContext || window.webkitAudioContext)) {
+      if (!test && (voice?.startsWith('pocket_') || voice?.startsWith('voicebox_')) && (window.AudioContext || window.webkitAudioContext)) {
         await this.speakStream({ room, requestId, voice, sequence, controller, key }); return;
       }
       const response = await fetch(test ? '/api/speech-test' : '/api/speech', {

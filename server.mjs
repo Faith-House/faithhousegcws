@@ -3,6 +3,7 @@ import { createWorkbench } from './workbench.mjs';
 import { isBrowserRequest } from './browser-intents.mjs';
 import { computerIntent } from './computer-intents.mjs';
 import { appIntent } from './navigation-intents.mjs';
+import { clientDevice } from './device-actions.mjs';
 import { recoverLanBindings } from './lan-recovery.mjs';
 import { createDiscordTextModel } from './discord-text.mjs';
 import { createDiscordIntegration } from './discord-integration.mjs';
@@ -96,6 +97,10 @@ const assets = new Map([
   ['/wakeword.js', ['wakeword.js', 'text/javascript; charset=utf-8']],
   ['/interruptions.js', ['interruptions.js', 'text/javascript; charset=utf-8']],
   ['/profile-selection.js', ['profile-selection.js', 'text/javascript; charset=utf-8']],
+  ['/device-navigation.js', ['device-navigation.js', 'text/javascript; charset=utf-8']],
+  ['/voicebox', ['voicebox.html', 'text/html; charset=utf-8']],
+  ['/voicebox.js', ['voicebox.js', 'text/javascript; charset=utf-8']],
+  ['/voicebox.css', ['voicebox.css', 'text/css; charset=utf-8']],
   ['/search-sources.js', ['search-sources.js', 'text/javascript; charset=utf-8']],
   ['/wake-chime.wav', ['wake-chime.wav', 'audio/wav']],
   ['/timer-chime.wav', ['timer-chime.wav', 'audio/wav']],
@@ -128,7 +133,7 @@ function requireRoom(room) {
   return room;
 }
 
-function initialState(view = 'minimal', calendarPreview = null, calendarDraft = null) { return { state: 'idle', view, requestId: null, answer: '', error: '', truncated: false, notification: null, calendarPreview, calendarDraft, webSearch: null, weatherPreview: null }; }
+function initialState(view = 'minimal', calendarPreview = null, calendarDraft = null) { return { state: 'idle', view, requestId: null, answer: '', error: '', truncated: false, notification: null, calendarPreview, calendarDraft, webSearch: null, weatherPreview: null, deviceActions: [] }; }
 
 function unavailableConnection(question) {
   const text = question.toLowerCase().replaceAll('’', "'");
@@ -219,7 +224,10 @@ export function createJarvisServer({ model = process.env.JARVIS_MODEL || 'qwen3:
     briefing: async routine => { const results=await Promise.allSettled([weather.answer('today’s weather'),calendar.preview({range:'day',date:new Intl.DateTimeFormat('en-CA',{timeZone:routine.timeZone}).format(new Date())})]);return results.map((r,i)=>r.status==='fulfilled'?(r.value.summary||r.value.answer||(i?'Calendar is ready in its panel.':'Weather is ready in its panel.')):(i?'Calendar could not be read.':'Weather could not be read.')).join(' '); },
     onActivity:activity.event, styleChanged: style => { visualStyle=style;for(const room of ROOMS){state.set(room,{...state.get(room),visualStyle:style});publish(room);} }, ...workbenchOptions
   });
-  const toolAgent = createToolAgent({ onActivity: activity.event, onResult: undoHistory.record, model: process.env.JARVIS_TOOL_MODEL || model, base, tools: createHouseTools({ actions, reminders, calendar, homeAssistant, systemHealth, webSearch, diagnostics, chores, weather, extraTools: workbench.tools, draftCalendarEvent: (room, event) => calendarDrafts.set(room, { ...event, expiresAt: Date.now() + 120000 }) }) });
+  const toolAgent = createToolAgent({ onActivity: activity.event, onResult: (context,result) => {
+    undoHistory.record(context,result);
+    if(result?.deviceAction && state.get(context.room)?.requestId===context.requestId) update(context.room,{deviceActions:[...(state.get(context.room).deviceActions||[]),result.deviceAction].slice(-4)});
+  }, model: process.env.JARVIS_TOOL_MODEL || model, base, tools: createHouseTools({ actions, reminders, calendar, homeAssistant, systemHealth, webSearch, diagnostics, chores, weather, extraTools: workbench.tools, draftCalendarEvent: (room, event) => calendarDrafts.set(room, { ...event, expiresAt: Date.now() + 120000 }) }) });
   const tvLaunch = createTvAutolaunch({ directory: actionsOptions.dataDirectory || `${APP_ROOT}/private`, pairing,
     receiver: () => ({ enabled: Boolean(displayServer?.server.listening), url: displayServer?.server.listening ? `http://${displayBind}:${displayServer.server.address().port}/` : null }),
     visible: id => displayServer?.isVisible(id) || false,
@@ -257,7 +265,7 @@ export function createJarvisServer({ model = process.env.JARVIS_MODEL || 'qwen3:
     return { ...await phonePairing.list(), enabled: Boolean(phoneAccess?.server.listening && phoneAccess?.bootstrap.listening), url: phoneAccess?.server.listening ? phoneAccess.url : null, setupUrl: phoneAccess?.bootstrap.listening ? phoneAccess.setupUrl : null, caFingerprint, error: phoneError, configured: Boolean(phoneBind) };
   }
   const discord = createDiscordIntegration({ directory: actionsOptions.dataDirectory || `${APP_ROOT}/private`, profiles, rooms: ROOMS, textDecide: createDiscordTextModel({model,ollamaUrl,memoryContext:workbench.memoryContext}),
-    bridge: createDiscordBridge({ baseUrl: () => `http://127.0.0.1:${server.address().port}/` }), ...discordOptions });
+    bridge: createDiscordBridge({ baseUrl: () => `http://127.0.0.1:${server.address().port}/`, client: {kind:'discord'} }), ...discordOptions });
   const toolContext = (room, profileId, question = '', view = 'minimal', signal) => ({ room, profileId: profileId || null, question, view, signal, timeZone: process.env.JARVIS_TIMEZONE || 'America/Chicago' });
 
   let modelCheck, modelCache;
@@ -362,7 +370,7 @@ export function createJarvisServer({ model = process.env.JARVIS_MODEL || 'qwen3:
     publish(room);
   }
 
-  async function generate(room, question, requestId, controller, profile, speaker, viewContext) {
+  async function generate(room, question, requestId, controller, profile, speaker, viewContext, client) {
     await modelRouter.initialize();
     let route = modelRouter.route({ room, profileId: profile?.id });
     const timer = setTimeout(() => controller.abort(new Error('timeout')), route.mode === 'coding' ? codingTimeoutMs : requestTimeoutMs);
@@ -403,7 +411,7 @@ export function createJarvisServer({ model = process.env.JARVIS_MODEL || 'qwen3:
       void bringUpTv(room, requestId, controller.signal).catch(() => {});
       const runActions = async () => {
       const extended = await workbench.handle(originalQuestion,context);
-      if(extended){if(extended.result&&!extended.readOnly)undoHistory.record(context,{...extended.result,undoUnsupported:!extended.result.undo});respond({state:'ready',answer:extended.answer,resultKind:'workbench',toolOutcome:extended.result?.outcome||null});return;}
+      if(extended){if(extended.result&&!extended.readOnly)undoHistory.record(context,{...extended.result,undoUnsupported:!extended.result.undo});respond({state:'ready',answer:extended.answer,resultKind:'workbench',toolOutcome:extended.result?.outcome||null,...(extended.result?.deviceAction?{deviceActions:[extended.result.deviceAction]}:{})});return;}
       if(isBrowserRequest(originalQuestion)||appIntent(originalQuestion)?.type==='compound'||/\b(?:workspace|code proposal|code draft|coding task|managed browser|computer volume|laptop volume|computer brightness|routines?|every morning|every day|every evening|daily briefing|background task|saved memor|remember|research|investigate)\b/i.test(originalQuestion)){
         if(acceptTools(await toolAgent.run(context)))return;
         if(isBrowserRequest(originalQuestion)||appIntent(originalQuestion)?.type==='compound'){respond({state:'ready',answer:'I could not execute that navigation request. No new app or browser action was confirmed. Please give the app name or website address, or split the steps.',resultKind:'workbench'});return;}
@@ -606,7 +614,7 @@ export function createJarvisServer({ model = process.env.JARVIS_MODEL || 'qwen3:
         prepare: () => {
           turn = conversation.prepare(scope);
           question = turn.question;
-          context = { ...toolContext(room, profile?.id, question, viewContext || state.get(room).view, controller.signal), requestId, messages: turn.messages };
+          context = { ...toolContext(room, profile?.id, question, viewContext || state.get(room).view, controller.signal), requestId, messages: turn.messages, client };
           compound = isCompoundToolRequest(question) && (isCommandCandidate(question) || isWeatherRequest(question) || /\b(?:chores?|housework|remind(?:er|ers)?|computer|laptop|system|cpu|diagnostics?)\b/i.test(question));
           useAgentFirst = compound || toolAgent.hasPending(context);
           householdCommand = Boolean(computerIntent(question)) || Boolean(appIntent(question)) || isBrowserRequest(question) || isUndoRequest(question) || (!/[`{}]/.test(question) && question.length <= 600 && (isWeatherRequest(question) || /^(?:(?:hey )?jarvis[, ]*)?(?:please )?(?:(?:can|could|would) you )?(?:show|open|close|hide|switch|go|set|start|stop|cancel|remind|list|mark|assign|add|turn|check)\b.*\b(?:dashboard|quiet|rings|timer|countdown|reminder|calendar|chores?|lights?|lamps?|network|connections)\b/i.test(question)));
@@ -665,6 +673,20 @@ export function createJarvisServer({ model = process.env.JARVIS_MODEL || 'qwen3:
       }
       if(request.method==='POST'&&url.pathname==='/api/workbench/settings')return json(response,200,await workbench.settings(await readJson(request)));
       if(request.method==='POST'&&url.pathname==='/api/workbench/approve'){const body=await readJson(request);return json(response,200,await workbench.approvals.resolve(body.id,body.allow));}
+      if(request.method==='GET'&&url.pathname==='/api/voicebox')return json(response,200,speech.voicebox?await speech.voicebox.status():{connected:false,detail:'Restart Jarvis to load the Voicebox adapter.'});
+      if(request.method==='GET'&&url.pathname==='/api/voicebox/preview'){
+        try { const wave=await readFile(`${actionsOptions.dataDirectory||`${APP_ROOT}/private`}/voicebox/preview.wav`);response.writeHead(200,{'Content-Type':'audio/wav','Cache-Control':'no-store'});return response.end(wave); }
+        catch{return json(response,404,{error:'Test the Voicebox voice before playing its preview.'});}
+      }
+      if(request.method==='POST'&&['/api/voicebox/prepare','/api/voicebox/activate'].includes(url.pathname)){
+        await readJson(request);
+        if(!speech.voicebox)return json(response,503,{error:'Restart Jarvis to load its Voicebox adapter.'});
+        if(url.pathname.endsWith('/prepare'))return json(response,200,await speech.voicebox.prepare());
+        const controller=new AbortController();response.once('close',()=>{if(!response.writableEnded)controller.abort(Error('Voice test closed.'));});
+        const result=await speech.voicebox.activate({signal:controller.signal});
+        for(const profile of (await profiles.list()).profiles)await profiles.update(profile.id,{voice:result.voice});
+        return json(response,200,result);
+      }
       if (request.method === 'GET' && assets.has(url.pathname)) {
         const [filename, mime] = assets.get(url.pathname);
         const file = await readFile(new URL(filename, publicRoot));
@@ -925,19 +947,21 @@ export function createJarvisServer({ model = process.env.JARVIS_MODEL || 'qwen3:
         const info = await speech.listVoices();
         if (!info.available) return json(response, 503, { error: 'No local voice is available on this computer.' });
         const preference = isTest ? null : await profiles.get(current.profileId);
-        const voice = body.voice || preference?.voice || info.defaultVoice;
+        const preferredVoice = body.voice || preference?.voice || info.defaultVoice;
+        const voice = !body.voice && !info.voices.some(item => item.name === preferredVoice) ? info.defaultVoice : preferredVoice;
         if (!info.voices.some(item => item.name === voice)) return json(response, 400, { error: 'Choose an installed local voice.' });
         const requestId = isTest ? 'voice-test' : body.requestId;
-        if (!isTest) scheduleExpiry(room, requestId, 90000);
+        const voiceTimeout = voice.startsWith('voicebox_') ? 300000 : 180000;
+        if (!isTest) scheduleExpiry(room, requestId, voice.startsWith('voicebox_') ? voiceTimeout + 15000 : 90000);
         const key = JSON.stringify([room, requestId, voice]);
         const controller = new AbortController();
         speechControllers.get(room).add(controller);
         response.on('close', () => { if (!response.writableEnded) controller.abort(new Error('Speech cancelled.')); });
         try {
           if (isStreaming) {
-            const timeout = setTimeout(() => controller.abort(new Error('Speech stream timed out.')), 180000); timeout.unref();
+            const timeout = setTimeout(() => controller.abort(new Error('Speech stream timed out.')), voiceTimeout); timeout.unref();
             try {
-              await streamReplySpeech({ response, requestId, voice, speech, snapshot: () => state.get(room), signal: controller.signal, keepAlive: (delay = 180000) => scheduleExpiry(room, requestId, delay), cache: audio => { speechCache.set(key, { room, audio }); while (speechCache.size > 4) speechCache.delete(speechCache.keys().next().value); } });
+              await streamReplySpeech({ response, requestId, voice, speech, snapshot: () => state.get(room), signal: controller.signal, keepAlive: (delay = voiceTimeout + 15000) => scheduleExpiry(room, requestId, delay), cache: audio => { speechCache.set(key, { room, audio }); while (speechCache.size > 4) speechCache.delete(speechCache.keys().next().value); } });
             } finally { clearTimeout(timeout); }
             return;
           }
@@ -987,6 +1011,7 @@ export function createJarvisServer({ model = process.env.JARVIS_MODEL || 'qwen3:
         }
         if (typeof body.question !== 'string' || !body.question.trim() || body.question.length > 24000) return json(response, 400, { error: 'Enter a question of up to 24,000 characters.' });
         if (active || recognitionActive) return json(response, 409, { error: 'Jarvis is already answering or recognizing speech. Wait a moment, or stop the current question.' });
+        const client = clientDevice(body.client);
         const manualProfile = body.profileSelection === 'manual' ? profile : null;
         let speaker = speakerTurns.consume({ token: body.speakerToken, room, text: body.question });
         if (speaker?.status === 'matched') {
@@ -1007,7 +1032,7 @@ export function createJarvisServer({ model = process.env.JARVIS_MODEL || 'qwen3:
         state.set(room, { ...initialState(state.get(room).view, state.get(room).calendarPreview, state.get(room).calendarDraft), state: 'thinking', requestId, profileId: profile?.id || null, modelMode: selectedRoute.mode, modelName: selectedRoute.model, maxInputChars: selectedRoute.maxInputChars, notification: state.get(room).notification });
         publish(room);
         json(response, 202, { requestId });
-        void generate(room, body.question.trim(), requestId, controller, profile, speaker, ['minimal', 'dashboard'].includes(body.viewContext) ? body.viewContext : null);
+        void generate(room, body.question.trim(), requestId, controller, profile, speaker, ['minimal', 'dashboard'].includes(body.viewContext) ? body.viewContext : null, client);
         return;
       }
       json(response, 404, { error: 'That page was not found.' });

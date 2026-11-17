@@ -1,7 +1,7 @@
 import { mkdir, readFile, writeFile, rename } from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
 import path from 'node:path';
-import { APP_ROOT, NEURAL_VOICES, DEFAULT_NEURAL_VOICE } from './voice-config.mjs';
+import { APP_ROOT, PROFILE_VOICES as NEURAL_VOICES, DEFAULT_NEURAL_VOICE } from './voice-config.mjs';
 import { SPEAKER_MODEL, cosine, chooseSpeaker } from './speaker-id.mjs';
 
 const fail = (message, status = 400) => Object.assign(new Error(message), { status });
