@@ -2,6 +2,7 @@ import { createAgentHarness } from './agent-harness.mjs';
 import { createWorkbench } from './workbench.mjs';
 import { isBrowserRequest } from './browser-intents.mjs';
 import { computerIntent } from './computer-intents.mjs';
+import { appIntent } from './navigation-intents.mjs';
 import { recoverLanBindings } from './lan-recovery.mjs';
 import { createDiscordTextModel } from './discord-text.mjs';
 import { createDiscordIntegration } from './discord-integration.mjs';
@@ -94,6 +95,7 @@ const assets = new Map([
   ['/microphone-worklet.js', ['microphone-worklet.js', 'text/javascript; charset=utf-8']],
   ['/wakeword.js', ['wakeword.js', 'text/javascript; charset=utf-8']],
   ['/interruptions.js', ['interruptions.js', 'text/javascript; charset=utf-8']],
+  ['/profile-selection.js', ['profile-selection.js', 'text/javascript; charset=utf-8']],
   ['/search-sources.js', ['search-sources.js', 'text/javascript; charset=utf-8']],
   ['/wake-chime.wav', ['wake-chime.wav', 'audio/wav']],
   ['/timer-chime.wav', ['timer-chime.wav', 'audio/wav']],
@@ -402,9 +404,9 @@ export function createJarvisServer({ model = process.env.JARVIS_MODEL || 'qwen3:
       const runActions = async () => {
       const extended = await workbench.handle(originalQuestion,context);
       if(extended){if(extended.result&&!extended.readOnly)undoHistory.record(context,{...extended.result,undoUnsupported:!extended.result.undo});respond({state:'ready',answer:extended.answer,resultKind:'workbench',toolOutcome:extended.result?.outcome||null});return;}
-      if(isBrowserRequest(originalQuestion)||/\b(?:workspace|code proposal|code draft|coding task|managed browser|computer volume|laptop volume|computer brightness|routines?|every morning|every day|every evening|daily briefing|background task|saved memor|remember|research|investigate)\b/i.test(originalQuestion)){
+      if(isBrowserRequest(originalQuestion)||appIntent(originalQuestion)?.type==='compound'||/\b(?:workspace|code proposal|code draft|coding task|managed browser|computer volume|laptop volume|computer brightness|routines?|every morning|every day|every evening|daily briefing|background task|saved memor|remember|research|investigate)\b/i.test(originalQuestion)){
         if(acceptTools(await toolAgent.run(context)))return;
-        if(isBrowserRequest(originalQuestion)){respond({state:'ready',answer:'I could not execute that browser request. No browser action was confirmed. Please give the website address or split the steps.',resultKind:'workbench'});return;}
+        if(isBrowserRequest(originalQuestion)||appIntent(originalQuestion)?.type==='compound'){respond({state:'ready',answer:'I could not execute that navigation request. No new app or browser action was confirmed. Please give the app name or website address, or split the steps.',resultKind:'workbench'});return;}
       }
       const modeIntent = modelModeIntent(originalQuestion);
       if (modeIntent) {
@@ -607,7 +609,7 @@ export function createJarvisServer({ model = process.env.JARVIS_MODEL || 'qwen3:
           context = { ...toolContext(room, profile?.id, question, viewContext || state.get(room).view, controller.signal), requestId, messages: turn.messages };
           compound = isCompoundToolRequest(question) && (isCommandCandidate(question) || isWeatherRequest(question) || /\b(?:chores?|housework|remind(?:er|ers)?|computer|laptop|system|cpu|diagnostics?)\b/i.test(question));
           useAgentFirst = compound || toolAgent.hasPending(context);
-          householdCommand = Boolean(computerIntent(question)) || isBrowserRequest(question) || isUndoRequest(question) || (!/[`{}]/.test(question) && question.length <= 600 && (isWeatherRequest(question) || /^(?:(?:hey )?jarvis[, ]*)?(?:please )?(?:(?:can|could|would) you )?(?:show|open|close|hide|switch|go|set|start|stop|cancel|remind|list|mark|assign|add|turn|check)\b.*\b(?:dashboard|quiet|rings|timer|countdown|reminder|calendar|chores?|lights?|lamps?|network|connections)\b/i.test(question)));
+          householdCommand = Boolean(computerIntent(question)) || Boolean(appIntent(question)) || isBrowserRequest(question) || isUndoRequest(question) || (!/[`{}]/.test(question) && question.length <= 600 && (isWeatherRequest(question) || /^(?:(?:hey )?jarvis[, ]*)?(?:please )?(?:(?:can|could|would) you )?(?:show|open|close|hide|switch|go|set|start|stop|cancel|remind|list|mark|assign|add|turn|check)\b.*\b(?:dashboard|quiet|rings|timer|countdown|reminder|calendar|chores?|lights?|lamps?|network|connections)\b/i.test(question)));
         },
         route: () => {
           return modelModeIntent(originalQuestion) || route.mode !== 'coding' || householdCommand ? 'actions' : 'conversation';
@@ -985,11 +987,13 @@ export function createJarvisServer({ model = process.env.JARVIS_MODEL || 'qwen3:
         }
         if (typeof body.question !== 'string' || !body.question.trim() || body.question.length > 24000) return json(response, 400, { error: 'Enter a question of up to 24,000 characters.' });
         if (active || recognitionActive) return json(response, 409, { error: 'Jarvis is already answering or recognizing speech. Wait a moment, or stop the current question.' });
+        const manualProfile = body.profileSelection === 'manual' ? profile : null;
         let speaker = speakerTurns.consume({ token: body.speakerToken, room, text: body.question });
         if (speaker?.status === 'matched') {
           profile = await profiles.get(speaker.profileId);
-          if (!profile?.voiceEnrolled) { profile = null; speaker = { status: 'unknown', profileId: null, reason: 'no-enrollments', authorized: false }; }
-        } else if (speaker?.status === 'unknown') profile = null;
+          if (!profile?.voiceEnrolled) { profile = manualProfile; speaker = { status: 'unknown', profileId: null, reason: 'no-enrollments', authorized: false }; }
+        } else if (speaker?.status === 'unknown') profile = manualProfile;
+        else if (body.profileSelection === 'automatic') profile = null;
         await modelRouter.initialize();
         const selectedRoute = modelRouter.route({ room, profileId: profile?.id });
         if (body.question.length > selectedRoute.maxInputChars) return json(response, 400, { error: selectedRoute.mode === 'coding' ? `Keep this coding request under ${selectedRoute.maxInputChars.toLocaleString()} characters.` : 'Switch to coding mode for longer code inputs; normal mode accepts up to 600 characters.' });

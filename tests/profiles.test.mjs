@@ -96,15 +96,20 @@ test('speaker API performs local enrollment and matching while protecting source
     const profileList = await (await fetch(base + '/api/profiles')).json(); assert.equal(profileList.profiles[0].voiceEnrolled, true); assert.equal(JSON.stringify(profileList).includes('embedding'), false);
     const recognized = await fetch(base + '/api/transcribe?room=bedroom-1&identify=1', { method: 'POST', headers: { 'Content-Type': 'audio/wav' }, body: wave() });
     const result = await recognized.json(); assert.equal(result.speaker.profileId, 'wade'); assert.equal(result.speaker.authorized, false); assert.equal(result.text, "Hey Jarvis, what's my name?");
-    const named = await ask({ question: "What's my name?", profileId: 'cooper', speakerToken: result.speakerToken });
+    const named = await ask({ question: "What's my name?", profileId: 'cooper', profileSelection: 'manual', speakerToken: result.speakerToken });
     assert.equal(named.answer, 'You’re Wade.'); assert.equal(named.profileId, 'wade');
     assert.match((await ask({ question: 'Do you have access to voice profiles?' })).answer, /learned Wade’s voice/);
     embedding = vector(1);
     const unknown = await fetch(base + '/api/transcribe?room=bedroom-1&identify=1', { method: 'POST', headers: { 'Content-Type': 'audio/wav' }, body: wave() }); const unknownResult = await unknown.json(); assert.equal(unknownResult.speaker.status, 'unknown');
     const anonymous = await ask({ question: "What's my name?", profileId: 'wade', speakerToken: unknownResult.speakerToken });
     assert.equal(anonymous.profileId, null); assert.match(anonymous.answer, /not sure who’s speaking/);
+    const unknownAgain = await (await fetch(base + '/api/transcribe?room=bedroom-1&identify=1', { method: 'POST', headers: { 'Content-Type': 'audio/wav' }, body: wave() })).json();
+    const manual = await ask({ question: "What's my name?", profileId: 'cooper', profileSelection: 'manual', speakerToken: unknownAgain.speakerToken });
+    assert.equal(manual.profileId,'cooper');assert.match(manual.answer,/not sure who’s speaking/);
+    const staleAutomatic = await ask({ question: "What's my name?", profileId: 'wade', profileSelection: 'automatic' });
+    assert.equal(staleAutomatic.profileId,null);
     const before = embeds;
-    const plain = await fetch(base + '/api/transcribe?room=bedroom-1', { method: 'POST', headers: { 'Content-Type': 'audio/wav' }, body: wave() }); assert.equal((await plain.json()).speaker, undefined); assert.equal(embeds, before); assert.equal(transcriptions, 3);
+    const plain = await fetch(base + '/api/transcribe?room=bedroom-1', { method: 'POST', headers: { 'Content-Type': 'audio/wav' }, body: wave() }); assert.equal((await plain.json()).speaker, undefined); assert.equal(embeds, before); assert.equal(transcriptions, 4);
   } finally { await app.shutdown(); }
 });
 

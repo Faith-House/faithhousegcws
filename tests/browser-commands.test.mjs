@@ -63,7 +63,7 @@ test("browser routing rejects negations and explanations and keeps compound requ
   );
 });
 
-function fakeBrowser({ status = 200, redirect, error } = {}) {
+function fakeBrowser({ status = 200, redirect, error, foreground } = {}) {
   let current = "about:blank",
     launches = 0,
     fronts = 0;
@@ -85,6 +85,7 @@ function fakeBrowser({ status = 200, redirect, error } = {}) {
   return {
     browser: createManagedBrowser({
       directory: tmpdir(),
+      foreground,
       launch: async () => {
         launches++;
         return { pages: () => [page], on() {}, close: async () => {} };
@@ -138,6 +139,84 @@ test("HTTP errors, failed navigation and unexpected redirects cannot become succ
       r.browser.close(),
       e.browser.close(),
     ]);
+  }
+});
+
+test("a loaded website is unverified when Windows refuses to foreground its managed window", async () => {
+  let folder;
+  const f = fakeBrowser({
+    foreground: async (value) => {
+      folder = value;
+      return { foreground: false };
+    },
+  });
+  try {
+    const result = await f.browser.run("cooper", "open", {
+      url: "https://youtube.com/",
+    });
+    assert.equal(result.outcome, "unverified");
+    assert.equal(result.foreground, false);
+    assert.equal(result.url, "https://youtube.com/");
+    assert.match(result.summary, /did not bring/);
+    assert.equal(path.basename(folder), "cooper");
+  } finally {
+    await f.browser.close();
+  }
+});
+
+test("Edge and Chrome use separate profiles and browser failures preserve the last working session", async () => {
+  const launches = [];
+  const browser = createManagedBrowser({
+    directory: tmpdir(),
+    launch: async (folder, engine) => {
+      launches.push({ folder, engine });
+      let current;
+      const page = {
+        goto: async (url) => {
+          current = url;
+          return { status: () => 200 };
+        },
+        url: () => current,
+        title: async () => engine,
+        bringToFront: async () => {},
+        locator: () => ({ innerText: async () => engine }),
+      };
+      return { pages: () => [page], on() {}, close: async () => {} };
+    },
+  });
+  try {
+    await browser.run("cooper", "open", {
+      url: "https://first.example/",
+      engine: "edge",
+    });
+    const chrome = await browser.run("cooper", "open", {
+      url: "https://second.example/",
+      engine: "chrome",
+    });
+    assert.equal(chrome.engine, "chrome");
+    assert.match(chrome.summary, /Chrome/);
+    assert.notEqual(launches[0].folder, launches[1].folder);
+    assert.deepEqual(
+      launches.map((a) => a.engine),
+      ["edge", "chrome"],
+    );
+    await assert.rejects(
+      browser.run("cooper", "open", {
+        url: "https://third.example/",
+        engine: "firefox",
+      }),
+      /supports Edge and Chrome/,
+    );
+    await assert.rejects(
+      browser.run("wade", "open", { url: "https://fourth.example/" }),
+      /Close an unused/,
+    );
+    assert.equal((await browser.run("cooper", "read")).text, "chrome");
+    await browser.run("cooper", "close");
+    assert.equal((await browser.run("cooper", "read")).text, "edge");
+    assert.deepEqual(browser.status().sessions, ["cooper"]);
+  } finally {
+    await browser.close();
   }
 });
 

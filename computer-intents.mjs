@@ -19,6 +19,12 @@ export function computerIntent(question) {
     )
   )
     return { operation: "screenshot" };
+  if (
+    /^(?:list|show|read)(?: me)? (?:the |my )?(?:(?:installed|available) (?:computer |windows )?apps|(?:computer |windows )(?:installed )?apps)[?!.]*$/i.test(
+      q,
+    )
+  )
+    return { operation: "list_apps" };
   const target = /\b(?:computer|laptop|desktop|pc|system)\b/i.test(q);
   if (!target) return null;
   const percent = q.match(

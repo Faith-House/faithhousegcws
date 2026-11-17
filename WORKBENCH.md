@@ -6,6 +6,11 @@ Open **Workbench** from the control dashboard, or visit [the local Workbench](ht
 
 - “Open YouTube in a browser.”
 - “Could you open github.com?”
+- “Open YouTube in Chrome.”
+- “Switch to Calculator.”
+- “Bring Notepad to the front.”
+- “Open Microsoft Word.”
+- “Show my installed apps.”
 - “Set computer volume to 40 percent.”
 - “What is my computer volume?”
 - “Take a screenshot.”
@@ -17,9 +22,15 @@ Open **Workbench** from the control dashboard, or visit [the local Workbench](ht
 - “Show my background tasks.”
 - “Set a daily routine to tell me the weather at 8 AM.”
 
-Website names and explicit addresses route to the managed Edge browser. A successful navigation returns its actual URL and page title. Failed launches, HTTP errors and unexpected redirects do not become a conversational claim of success. Other wording can use the local planner, which validates its arguments before executing tools. Unsupported operations remain unavailable.
+Website names and explicit addresses navigate automatically in the managed browser. Say “in Chrome” or “in Edge” to select one; otherwise Jarvis uses that profile’s last browser, initially Edge. A successful navigation returns the actual URL and title and checks that the managed browser window is in front. A loaded page whose window could not be focused is reported as unverified. Failed launches, HTTP errors and unexpected redirects do not become a conversational claim of success. Firefox navigation is not supported by this adapter; Jarvis asks for Edge or Chrome instead of silently substituting one.
 
-Choose a roommate profile for personal Workbench actions. Discord commands use the profile and room linked to the Discord account. A voice match helps select a profile; it is not a secure identity check.
+App requests use Windows’ installed Start menu entries, including packaged apps such as Calculator and Notepad. Jarvis accepts familiar aliases such as “Chrome,” “Word” and “VS Code,” reuses a matching open window when possible, restores it if minimized and verifies foreground focus. For names shared by an app and website, an installed app takes precedence; “in a browser” forces the website and “app” forces the installed app. Duplicate or missing entries need a more specific name. The Computer page lists actual installed entries; portable programs without a Windows app entry need to be registered first. Model-generated executable paths and launch arguments are not accepted.
+
+These commands control **the computer running Jarvis**, including requests received from a paired phone or linked Discord account. They do not open apps on the phone or change the TV input. Windows can refuse foreground focus, particularly while the desktop is locked; Jarvis reports that result. Other wording can use the local planner, which validates its arguments before executing tools.
+
+Opening apps, listing installed apps and navigating websites work with **Shared profile**. Shared browsing uses a separate session for each room and never borrows a roommate’s browser profile. Personal files, saved memory, research/code tasks, routines, desktop screenshots and other desktop input still require a selected roommate. The shared tool catalog contains only app launch/listing and browser navigation/read/input tools; shared browser screenshots are excluded.
+
+The dashboard’s **Using** menu shows the active profile. A deliberate profile selection is saved on this browser and reused when a voice is not identified. A fresh recognized voice selects that roommate for the voice turn; a subsequent unknown voice does not inherit the last person recognized. Typed requests return to the deliberate selection, or Shared if none was chosen. Profile selection also carries between the dashboard and Workbench. Discord commands use the profile and room linked to the Discord account. A voice match and a manually selected preference profile are not secure identity checks.
 
 ## Direct execution and action history
 
@@ -56,9 +67,9 @@ Research searches public sources and reads bounded pages. It blocks local/privat
 
 ## Browser, computer and vision
 
-The managed browser uses a separate Edge profile for each roommate. It does not inherit ordinary browser tabs or sign-ins. Navigation, page reading, exact-label clicks, field input, supported keys and screenshots are available. Downloads are disabled in this managed session.
+The managed browser uses separate Edge or Chrome profiles for each roommate. It does not inherit ordinary browser tabs or sign-ins. Navigation, page reading, exact-label clicks, field input, supported keys and screenshots are available. Downloads are disabled in this managed session. At most two managed browser sessions may run at once on this laptop. Closing the active browser selects the profile’s other open managed browser, if available.
 
-Computer controls include approved app aliases, window selection, supported input, audio readback, volume/mute, supported display brightness, screenshots and delayed power commands. The window picker fills the target automatically. Input to protected processes is refused; coordinates must belong to the chosen process. Some external monitors do not expose brightness control.
+Computer controls include installed app launch/switching, window selection, supported input, audio readback, volume/mute, supported display brightness, screenshots and delayed power commands. App discovery is read-only and cached for up to a minute. Browser focus identifies the managed profile’s actual processes rather than selecting an unrelated browser window. The window picker fills the target automatically. Input to protected processes is refused; coordinates must belong to the chosen process. Some external monitors do not expose brightness control.
 
 Vision runs through a selected installed Ollama vision model. Upload an image, capture an explicitly requested desktop screenshot, or open the webcam and save a frame. Camera permission is still controlled by the browser. Images stay local. On this laptop vision can take substantially longer than text conversation; a successful small-image check does not establish accuracy for every screenshot or document.
 

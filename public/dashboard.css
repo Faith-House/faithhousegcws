@@ -17,7 +17,7 @@ body.dashboard-layout{height:auto;min-height:100vh;overflow:visible;background:r
 .brand-mark i{position:absolute;border:1px solid #ee8b3c;border-radius:50%;width:30px;height:30px;border-right-color:transparent;transform:rotate(-35deg)}
 .brand-mark i:nth-child(2){width:21px;height:21px;transform:rotate(120deg);border-color:#b85f28 #b85f28 transparent}
 .brand-mark i:nth-child(3){width:8px;height:8px;border:0;background:#ffba75;box-shadow:0 0 13px #ed762c75}
-.dashboard-nav{display:flex;align-items:center;gap:24px;margin-left:auto}
+.dashboard-nav{display:flex;align-items:center;gap:24px;margin-left:auto;min-width:0;overflow-x:auto;scrollbar-width:thin}
 .dashboard-nav a{color:#9f9284;text-decoration:none;font-size:12px;white-space:nowrap;transition:color .2s}
 .dashboard-nav a:hover,.text-link:hover{color:#ffd0a0}
 .dashboard-nav .workbench-entry{color:#ffd0a0;border-bottom:1px solid #b97943;padding-bottom:4px}
@@ -34,6 +34,8 @@ body.dashboard-layout{height:auto;min-height:100vh;overflow:visible;background:r
 .dashboard-heading h1{font-size:29px;letter-spacing:-.04em;font-weight:450;line-height:1.2;margin:0}
 .heading-dot{color:#f19b55;margin-left:2px}
 .room-picker{display:flex;align-items:center;gap:12px}
+.dashboard-scope{display:flex;gap:16px;flex-wrap:wrap;justify-content:flex-end}
+@media(max-width:600px){.dashboard-heading{flex-wrap:wrap;gap:14px}.dashboard-scope{justify-content:flex-start}}
 .room-picker label{font-size:11px;color:#8d7d6c}
 .room-picker select{background:#15110d;border:1px solid #493321;border-radius:8px;color:#e8c6a4;padding:9px 30px 9px 12px;max-width:180px;font-size:12px}
 .dashboard-grid{display:grid;grid-template-columns:250px minmax(0,1fr) 270px;gap:18px;align-items:start}

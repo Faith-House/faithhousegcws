@@ -11,6 +11,7 @@ import { LocalSpeech } from './speech.js';
 import { LocalMicrophone } from './microphone.js';
 import { WakeWordListener } from './wakeword.js';
 import { isStopReply, stripWakePhrase, wakeShouldPause } from './interruptions.js';
+import { createProfileSelection } from './profile-selection.js';
 
 const $ = id => document.getElementById(id);
 const orb = new JarvisOrb($('orb'));
@@ -43,6 +44,8 @@ let roommateProfiles = [];
 let activeModelRoute = { mode: 'normal', maxInputChars: 600 };
 let modelRefreshEpoch = 0;
 let selectedProfileId = '';
+const profileSelection = createProfileSelection();
+const profileControls = () => [$('profile'), $('dashboard-profile')].filter(Boolean);
 let globalSpeechMuted;
 let speakerNotice = '';
 let pendingSpeakerToken = null;
@@ -70,15 +73,17 @@ const microphone = new LocalMicrophone(() => {
   const automatic = wakeTurn && wake.enabled;
   const interrupted = wakeInterrupted; wakeInterrupted = false;
   wakeTurn = false;
+  const selected = profileSelection.identify(result.speaker);
+  applyProfile(selected.profileId, false);
   if (result.speaker) {
-    applyProfile(result.speaker.status === 'matched' ? result.speaker.profileId : '', false);
-    speakerNotice = result.speaker.status === 'matched' ? `Using ${result.speaker.name}’s profile` : 'Speaker unknown · using the shared profile';
+    const name = roommateProfiles.find(profile => profile.id === selected.profileId)?.name;
+    speakerNotice = result.speaker.status === 'matched' ? `Using ${result.speaker.name}’s profile` : name ? `Voice not identified · using selected ${name} profile` : 'Voice not identified · using Shared profile';
   } else speakerNotice = '';
   const question = automatic ? stripWakePhrase(text) : text;
   if (automatic && isStopReply(question) && (interrupted || /^(?:stop|be quiet|quiet please)\b/i.test(question))) {
     pendingSpeakerToken = null; speech.stop(); $('question').value = ''; closeComposer(); resumeWanted = true; updateVisuals(); return;
   }
-  $('question').value = question; $('question').dispatchEvent(new Event('input'));
+  $('question').value = question; resizeQuestion();
   pendingSpeakerToken = result.speakerToken || null;
   if (automatic && question) void submitQuestion(question);
   else { $('question').focus(); updateVisuals(); }
@@ -199,7 +204,7 @@ function updateVisuals() {
   $('microphone-time').textContent = `${Math.floor(microphone.elapsed || 0)} / 20s`;
   $('test-voice').disabled = !voicesAvailable || micActive;
   $('question').readOnly = micActive;
-  $('profile').disabled = micActive || submitting;
+  for (const control of profileControls()) control.disabled = micActive || submitting;
   const text = snapshot.state === 'error' ? snapshot.error : snapshot.answer;
   const calendarData = snapshot.calendarPreview;
   document.body.classList.toggle('has-answer', Boolean(text));
@@ -360,10 +365,14 @@ async function refreshModelRoute() {
   } catch { /* Existing conversation controls remain usable. */ }
 }
 function applyProfile(id, persist = true) {
+  if (persist) profileSelection.select(id);
   const profile = roommateProfiles.find(item => item.id === id);
   selectedProfileId = profile?.id || '';
-  $('profile').value = selectedProfileId;
-  if (persist) saveSetting('jarvis.profile', selectedProfileId);
+  for (const control of profileControls()) control.value = selectedProfileId;
+  if (persist) {
+    saveSetting('jarvis.profile', selectedProfileId); saveSetting('jarvis-workbench-profile', selectedProfileId);
+    const url = new URL(location.href); url.searchParams.delete('profile'); url.searchParams.set('profileId', selectedProfileId); history.replaceState(null, '', url);
+  }
   voice = profile?.voice || readSetting('jarvis.voice', 'bm_george');
   voiceEnabled = !globalSpeechMuted && (profile?.spokenReplies ?? true);
   $('voice-enabled').checked = voiceEnabled;
@@ -379,15 +388,22 @@ async function refreshProfiles() {
     const response = await fetch('/api/profiles', { cache: 'no-store' });
     if (!response.ok) throw new Error('Profile setup unavailable');
     const info = await response.json(); roommateProfiles = info.profiles;
-    $('profile').replaceChildren(new Option('Shared profile', ''), ...roommateProfiles.map(profile => new Option(profile.name, profile.id)));
+    profileSelection.setProfiles(roommateProfiles);
+    for (const control of profileControls()) control.replaceChildren(new Option('Shared profile', ''), ...roommateProfiles.map(profile => new Option(profile.name, profile.id)));
     const enabled = info.speakerModel.available && roommateProfiles.some(profile => profile.voiceEnrolled);
     $('identify-speaker').disabled = !enabled;
     $('identify-speaker').checked = readSetting('jarvis.identifySpeaker', 'on') !== 'off';
     $('speaker-availability').textContent = enabled ? 'Local voice matching' : 'Set up voices in Profiles';
     if (!profilesInitialized) {
       profilesInitialized = true;
-      applyProfile(params.has('profile') ? params.get('profile') : readSetting('jarvis.profile', ''));
-    } else $('profile').value = selectedProfileId;
+      const savedProfile = params.has('profileId') ? params.get('profileId') : params.has('profile') ? params.get('profile') : readSetting('jarvis.profile', readSetting('jarvis-workbench-profile', ''));
+      applyProfile(savedProfile);
+    } else {
+      const savedManual = readSetting('jarvis.profile', profileSelection.manualId);
+      if (!busy && microphone.state === 'idle' && savedManual !== profileSelection.manualId) profileSelection.select(savedManual);
+      if ((profileSelection.current().profileId || '') !== selectedProfileId) applyProfile(profileSelection.current().profileId, false);
+      for (const control of profileControls()) control.value = selectedProfileId;
+    }
     updateVisuals();
   } catch { $('speaker-availability').textContent = 'Profile setup unavailable'; }
   })().finally(() => { profileRefresh = null; });
@@ -396,12 +412,17 @@ async function refreshProfiles() {
 if (!displayOnly) void refreshProfiles();
 window.addEventListener('focus', () => { void refreshProfiles(); });
 document.addEventListener('visibilitychange', () => { if (!document.hidden) void refreshProfiles(); });
-window.addEventListener('storage', event => { if (event.key === 'jarvis.profilesUpdated') void refreshProfiles(); });
+window.addEventListener('storage', event => {
+  if (event.key === 'jarvis.profilesUpdated') void refreshProfiles();
+  if (event.key === 'jarvis.profile' && !busy && microphone.state === 'idle') {
+    profileSelection.select(event.newValue); pendingSpeakerToken = null; applyProfile(profileSelection.current().profileId, false);
+  }
+});
 $('identify-speaker').addEventListener('change', () => saveSetting('jarvis.identifySpeaker', $('identify-speaker').checked ? 'on' : 'off'));
-$('profile').addEventListener('change', () => {
+for (const control of profileControls()) control.addEventListener('change', () => {
   stopHandsFree(); microphone.cancel(); speech.stop(); ownedRequestId = null; speakerNotice = '';
   pendingSpeakerToken = null;
-  applyProfile($('profile').value);
+  applyProfile(control.value);
 });
 if (!displayOnly) void (async () => {
   try {
@@ -466,7 +487,13 @@ $('timer-sound').addEventListener('click', () => { $('timer-audio').currentTime 
 $('ask-button').addEventListener('click', openComposer);
 $('visual').addEventListener('click', openComposer);
 $('close-composer').addEventListener('click', closeComposer);
-$('question').addEventListener('input', () => { pendingSpeakerToken = null; $('question').style.height = 'auto'; $('question').style.height = Math.min($('question').scrollHeight, 90) + 'px'; updateVisuals(); });
+function resizeQuestion() { $('question').style.height = 'auto'; $('question').style.height = Math.min($('question').scrollHeight, 90) + 'px'; }
+$('question').addEventListener('input', () => {
+  pendingSpeakerToken = null;
+  const selected = profileSelection.forText();
+  if ((selected.profileId || '') !== selectedProfileId) applyProfile(selected.profileId, false);
+  resizeQuestion(); updateVisuals();
+});
 $('question').addEventListener('keydown', event => {
   if (event.key === 'Enter' && !event.shiftKey) {
     event.preventDefault();
@@ -474,8 +501,13 @@ $('question').addEventListener('keydown', event => {
   }
 });
 async function submitQuestion(question) {
+  if (!profilesInitialized) await refreshProfiles();
   if (interrupting) await interruptPromise;
   if (!question || busy || submitting || microphone.state !== 'idle') { formError('Wait for the current question, then send again.'); updateVisuals(); return; }
+  if (!pendingSpeakerToken) {
+    const selected = profileSelection.forText();
+    if ((selected.profileId || '') !== selectedProfileId) applyProfile(selected.profileId, false);
+  }
   microphone.cancel();
   speech.stop();
   if (voiceEnabled) speech.warm({ voice });
@@ -484,7 +516,7 @@ async function submitQuestion(question) {
   const epoch = questionEpoch;
   $('send').disabled = true;
   try {
-    const accepting = post('/api/ask', { room, question, viewContext: document.body.dataset.view, profileId: selectedProfileId || null, speakerToken: pendingSpeakerToken });
+    const accepting = post('/api/ask', { room, question, viewContext: document.body.dataset.view, ...profileSelection.current(), speakerToken: pendingSpeakerToken });
     pendingAsk = accepting;
     const accepted = await accepting;
     if (epoch !== questionEpoch) return;

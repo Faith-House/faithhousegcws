@@ -4,15 +4,27 @@ export function createManagedBrowser({
   directory,
   launch,
   headless = false,
+  foreground,
 } = {}) {
   const sessions = new Map(),
     opening = new Map(),
-    queues = new Map();
+    queues = new Map(),
+    active = new Map();
   let closed = false;
-  async function session(profile) {
+  async function session(profile, chosen) {
     if (closed) throw problem("The managed browser is stopping.", 503);
-    if (sessions.has(profile)) return sessions.get(profile);
-    if (opening.has(profile)) return opening.get(profile);
+    const engine =
+      chosen || sessions.get(active.get(profile))?.engine || "edge";
+    if (!["edge", "chrome"].includes(engine))
+      throw problem(
+        "Website navigation currently supports Edge and Chrome. Choose one of those browsers.",
+      );
+    const key = profile + ":" + engine;
+    if (sessions.has(key)) {
+      active.set(profile, key);
+      return sessions.get(key);
+    }
+    if (opening.has(key)) return opening.get(key);
     if (sessions.size + opening.size >= 2)
       throw problem(
         "Close an unused managed browser before opening another profile.",
@@ -20,10 +32,10 @@ export function createManagedBrowser({
       );
     const factory =
       launch ||
-      (async (folder) => {
+      (async (folder, engine) => {
         const { chromium } = await import("playwright-core");
         return chromium.launchPersistentContext(folder, {
-          channel: "msedge",
+          channel: engine === "chrome" ? "chrome" : "msedge",
           headless,
           acceptDownloads: false,
           viewport: { width: 1280, height: 800 },
@@ -32,9 +44,12 @@ export function createManagedBrowser({
     const pending = (async () => {
       let context;
       try {
-        context = await factory(
-          path.join(directory, "browser-profiles", profile),
+        const folder = path.join(
+          directory,
+          "browser-profiles",
+          profile + (engine === "chrome" ? ".chrome" : ""),
         );
+        context = await factory(folder, engine);
         if (closed) {
           await context.close();
           throw Error("Stopping");
@@ -42,26 +57,32 @@ export function createManagedBrowser({
         const state = {
           context,
           page: context.pages()[0] || (await context.newPage()),
+          profile,
+          engine,
+          folder,
         };
-        sessions.set(profile, state);
+        sessions.set(key, state);
+        active.set(profile, key);
         context.on?.("close", () => {
-          if (sessions.get(profile) === state) sessions.delete(profile);
+          if (sessions.get(key) === state) sessions.delete(key);
         });
         return state;
       } catch {
-        if (context && !sessions.has(profile))
+        if (context && !sessions.has(key))
           await context.close().catch(() => {});
         throw problem(
-          "Jarvis could not start its managed Microsoft Edge browser. Check that Edge is installed and close any stuck Jarvis browser window.",
+          "Jarvis could not start its managed " +
+            (engine === "chrome" ? "Chrome" : "Edge") +
+            " browser. Check that it is installed and close any stuck Jarvis browser window.",
           503,
         );
       }
     })();
-    opening.set(profile, pending);
+    opening.set(key, pending);
     try {
       return await pending;
     } finally {
-      opening.delete(profile);
+      opening.delete(key);
     }
   }
   function url(value) {
@@ -114,13 +135,21 @@ export function createManagedBrowser({
       ].includes(args.key)
     )
       throw problem("Unsupported browser key.");
-    if (action !== "open" && !sessions.has(profile))
+    if (action !== "open" && !sessions.has(active.get(profile)))
       throw problem("Open a managed browser for this profile first.", 409);
-    const state = await session(profile);
+    const state = await session(
+      profile,
+      action === "open" ? args.engine : undefined,
+    );
     signal?.throwIfAborted();
     if (action === "close") {
       await state.context.close();
-      sessions.delete(profile);
+      sessions.delete(profile + ":" + state.engine);
+      const other = [...sessions.keys()].find(
+        (k) => sessions.get(k).profile === profile,
+      );
+      if (other) active.set(profile, other);
+      else active.delete(profile);
       return {
         outcome: "confirmed",
         summary: "Closed this profile’s managed browser.",
@@ -167,19 +196,43 @@ export function createManagedBrowser({
         const expected =
           actualHost === requestedHost ||
           actualHost.endsWith("." + requestedHost);
+        let focus;
+        if (!headless && foreground) {
+          try {
+            focus = await foreground(state.folder, { signal });
+          } catch (error) {
+            signal?.throwIfAborted();
+            focus = {
+              foreground: false,
+              summary: "Window focus could not be confirmed.",
+            };
+          }
+        }
+        const inFront = focus?.foreground;
         return {
-          outcome: expected ? "confirmed" : "unverified",
-          summary: expected
-            ? "Opened " +
-              (title || actualHost) +
-              " in Jarvis’s managed Edge browser."
-            : "The browser navigated to " +
-              actualHost +
-              " after a redirect. The requested page was not independently confirmed.",
+          outcome: expected && inFront !== false ? "confirmed" : "unverified",
+          summary:
+            expected && inFront === false
+              ? "Loaded " +
+                (title || actualHost) +
+                ", but Windows did not bring the browser window to the front."
+              : expected
+                ? "Opened " +
+                  (title || actualHost) +
+                  " in Jarvis’s managed " +
+                  (state.engine === "chrome" ? "Chrome" : "Edge") +
+                  " browser." +
+                  (inFront === true ? " Its window is in front." : "")
+                : "The browser navigated to " +
+                  actualHost +
+                  " after a redirect. The requested page was not independently confirmed.",
           requestedUrl: address,
           url: actual,
           title,
           httpStatus: status,
+          engine: state.engine,
+          foreground: inFront ?? null,
+          windowFocus: focus || null,
         };
       } else if (action === "click") {
         text(args.label, 160);
@@ -265,8 +318,12 @@ export function createManagedBrowser({
   return {
     run,
     status: () => ({
-      sessions: [...sessions.keys()],
-      engine: "Managed Microsoft Edge",
+      sessions: [...new Set([...sessions.values()].map((s) => s.profile))],
+      sessionDetails: [...sessions.values()].map(({ profile, engine }) => ({
+        profile,
+        engine,
+      })),
+      engine: "Managed Edge / Chrome",
       separateProfiles: true,
     }),
     async close() {
@@ -276,6 +333,7 @@ export function createManagedBrowser({
         [...sessions.values()].map((s) => s.context.close()),
       );
       sessions.clear();
+      active.clear();
       await Promise.allSettled([...queues.values()]);
     },
   };

@@ -1,12 +1,13 @@
 import { createAgentHarness } from './agent-harness.mjs';
 import { isBrowserRequest } from './browser-intents.mjs';
 import { computerIntent } from './computer-intents.mjs';
+import { appIntent } from './navigation-intents.mjs';
 import { commonToolPlan } from './common-tool-plan.mjs';
 import { normalizeCommand } from './local-actions.mjs';
 import { isSearchRequest } from './web-search.mjs';
 import { isUndoRequest } from './conversation.mjs';
 // Channel conversation is kept separate from household tool execution.
-const householdRequest=text=>Boolean(computerIntent(text))||isBrowserRequest(text)||commonToolPlan(text)!==null||isUndoRequest(text)||isSearchRequest(text)||/\b(?:weather|forecast|calendar|agenda|chores?|housework|workspace|research|investigate|background tasks?|code proposal|managed browser|memories|remember|routines|reminders?|timers?|countdown|dashboard|quiet mode|rings|lights?|lamps?|locks?|tv|television|wi-?fi|network|diagnos\w*|computer|laptop|system status)\b|\b(?:remind me|nudge me|what(?:'s| is) (?:the )?(?:time|date)|what time|coding mode|normal mode|what can you (?:do|control))\b|\b(?:give me|set|start|need)\b.*\b(?:seconds?|minutes?|hours?)\b/i.test(text);
+const householdRequest=text=>Boolean(computerIntent(text))||Boolean(appIntent(text))||isBrowserRequest(text)||commonToolPlan(text)!==null||isUndoRequest(text)||isSearchRequest(text)||/\b(?:weather|forecast|calendar|agenda|chores?|housework|workspace|research|investigate|background tasks?|code proposal|managed browser|memories|remember|routines|reminders?|timers?|countdown|dashboard|quiet mode|rings|lights?|lamps?|locks?|tv|television|wi-?fi|network|diagnos\w*|computer|laptop|system status)\b|\b(?:remind me|nudge me|what(?:'s| is) (?:the )?(?:time|date)|what time|coding mode|normal mode|what can you (?:do|control))\b|\b(?:give me|set|start|need)\b.*\b(?:seconds?|minutes?|hours?)\b/i.test(text);
 export function discordControlIntent(text){
  const q=normalizeCommand(text);
  if(/^(?:stop|stop (?:talking|speaking|answering|generating)|be quiet|enough)$/.test(q))return 'stop';

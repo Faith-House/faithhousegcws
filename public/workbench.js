@@ -22,6 +22,7 @@ let current =
   snapshot,
   profileId =
     params.get("profileId") ||
+    localStorage.getItem("jarvis.profile") ||
     localStorage.getItem("jarvis-workbench-profile") ||
     "cooper",
   room =
@@ -589,8 +590,8 @@ function browser() {
     g,
     "Managed browser",
     executionCopy(
-      "Jarvis uses a separate Edge profile for each housemate. Opening pages and sending input require review.",
-      "Jarvis uses a separate Edge profile for each housemate. Browser commands execute immediately.",
+      "Jarvis uses separate Edge or Chrome profiles on this computer. Opening pages and sending input require review.",
+      "Jarvis uses separate Edge or Chrome profiles on this computer. Pages open and come forward automatically.",
     ),
     [
       [
@@ -611,6 +612,17 @@ function browser() {
         ],
       ],
       ["url", "Page address", "url", "https://example.com"],
+      [
+        "engine",
+        "Browser for opening a page",
+        "select",
+        "",
+        [
+          ["", "Last used (Edge initially)"],
+          ["edge", "Microsoft Edge"],
+          ["chrome", "Google Chrome"],
+        ],
+      ],
       ["label", "Exact button / field label"],
       [
         "role",
@@ -663,7 +675,17 @@ function computer() {
         "list_windows",
         snapshot.desktop.actions,
       ],
-      ["app", "Application", "select", "notepad", snapshot.desktop.apps],
+      [
+        "app",
+        "Installed application",
+        "select",
+        snapshot.desktop.appDetails?.find((a) => a.name === "Notepad")?.id ||
+          snapshot.desktop.apps?.[0] ||
+          "",
+        snapshot.desktop.appDetails?.map(({ name, id }) => [id, name]) ||
+          snapshot.desktop.apps ||
+          [],
+      ],
       ["pid", "Target process ID", "number", ""],
       ["text", "Text to type", "textarea", ""],
       [
@@ -700,7 +722,7 @@ function computer() {
   );
   card(
     "Visible outcomes",
-    "Window focus, process exit, and audio readback can be checked. Mouse and keyboard input is reported as delivered; the application’s final result may still need inspection. Shutdown and restart are delayed 60 seconds and can be cancelled.",
+    "Say “Open Word” or “Switch to Calculator.” Jarvis finds the installed app and reuses its window when possible. It checks that the window is in front. Mouse and keyboard input is reported as delivered; the application’s final result may still need inspection. Shutdown and restart are delayed 60 seconds and can be cancelled.",
     g,
   );
   const picker = card(
@@ -1297,6 +1319,7 @@ $("profile").addEventListener("change", () =>
     profileId = $("profile").value;
     folder = "";
     localStorage.setItem("jarvis-workbench-profile", profileId);
+    localStorage.setItem("jarvis.profile", profileId);
     $("result-panel").hidden = true;
     $("review-panel").hidden = true;
     await refresh();

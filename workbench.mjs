@@ -9,6 +9,7 @@ import { createResearch } from "./workbench-research.mjs";
 import { createJobs } from "./workbench-jobs.mjs";
 import { browserIntent } from "./browser-intents.mjs";
 import { computerIntent } from "./computer-intents.mjs";
+import { appIntent } from "./navigation-intents.mjs";
 
 const hash = (data) => createHash("sha256").update(data).digest("hex");
 const confirmed = (summary, data = {}) => ({
@@ -33,6 +34,31 @@ const multiline = (maxLength = 4000) => ({
   ...string(maxLength),
   contentMediaType: "text/plain",
 });
+const sharedBrowserOperations = new Set([
+  "open",
+  "read",
+  "click",
+  "type",
+  "press",
+  "back",
+  "forward",
+  "close",
+]);
+const sharedToolNames = new Set([
+  "open_managed_browser",
+  "read_managed_browser",
+  "control_managed_browser",
+  "open_computer_app",
+  "list_installed_apps",
+]);
+function sharedComputerAction(action, args = {}) {
+  return (
+    (action === "desktop" &&
+      ["open_app", "list_apps"].includes(args?.operation)) ||
+    (action === "browser" && sharedBrowserOperations.has(args?.operation))
+  );
+}
+const browserOwner = ({ profileId, room }) => profileId || "shared--" + room;
 export function createWorkbench({
   directory,
   profiles,
@@ -56,8 +82,13 @@ export function createWorkbench({
   const store = createWorkbenchStore(directory),
     workspace = createWorkspace({ directory }),
     approvals = createApprovals({ now }),
-    desktop = createDesktop(),
-    browser = createBrowser({ directory });
+    desktop = createDesktop({
+      browserDirectory: path.join(directory, "browser-profiles"),
+    }),
+    browser = createBrowser({
+      directory,
+      foreground: (folder, options) => desktop.focusBrowser?.(folder, options),
+    });
   const modelControllers = new Set();
   let closed = false;
   async function modelCall(
@@ -138,12 +169,15 @@ export function createWorkbench({
         )),
     now,
   });
-  async function scope(input) {
-    if (!input || !(await profiles.get(input.profileId)))
+  async function scope(input, allowShared = false) {
+    const profile = input?.profileId
+      ? await profiles.get(input.profileId)
+      : null;
+    if (!input || (input.profileId && !profile) || (!profile && !allowShared))
       throw problem("Choose a current roommate profile.");
     if (!rooms.includes(input.room)) throw problem("Choose a current room.");
     return {
-      profileId: input.profileId,
+      profileId: profile?.id || null,
       room: input.room,
       ...(input.signal instanceof AbortSignal ? { signal: input.signal } : {}),
     };
@@ -165,7 +199,7 @@ export function createWorkbench({
       routines: data.routines.filter((t) => t.profileId === profileId),
       memory: data.memory.filter((t) => t.profileId === profileId),
       approvals: approvals.list().filter((t) => t.profileId === profileId),
-      desktop: desktop.status(),
+      desktop: await desktop.status(),
       browser: browser.status(),
       health: await systemHealth.read(),
       discord: discordStatus
@@ -411,7 +445,10 @@ export function createWorkbench({
     };
   }
   async function dispatch(input) {
-    const context = await scope(input),
+    const context = await scope(
+        input,
+        sharedComputerAction(input?.action, input?.args),
+      ),
       { profileId } = context,
       action = input.action;
     const args = structuredClone(input.args || {});
@@ -598,7 +635,7 @@ export function createWorkbench({
           "Enable computer controls in Workbench settings first.",
           409,
         );
-      if (["list_windows", "get_audio"].includes(args.operation))
+      if (["list_windows", "list_apps", "get_audio"].includes(args.operation))
         return desktop.run(args.operation, args, { signal: context.signal });
       return staged(
         context,
@@ -617,12 +654,13 @@ export function createWorkbench({
           "Enable the managed browser in Workbench settings first.",
           409,
         );
+      const sessionOwner = browserOwner(context);
       if (["read", "screenshot"].includes(args.operation)) {
-        if (!browser.status().sessions.includes(profileId))
+        if (!browser.status().sessions.includes(sessionOwner))
           throw problem("Open a managed browser for this profile first.", 409);
         return imageResult(
           profileId,
-          await browser.run(profileId, args.operation, args, {
+          await browser.run(sessionOwner, args.operation, args, {
             signal: context.signal,
           }),
         );
@@ -634,7 +672,7 @@ export function createWorkbench({
         async () =>
           imageResult(
             profileId,
-            await browser.run(profileId, args.operation, args, {
+            await browser.run(sessionOwner, args.operation, args, {
               signal: context.signal,
             }),
           ),
@@ -870,17 +908,47 @@ export function createWorkbench({
     let args, action;
     const browsing = browserIntent(question);
     const computing = computerIntent(question);
+    const launching = appIntent(question);
     if (computing?.clarification)
       return { handled: true, answer: computing.clarification };
     if (browsing?.type === "clarify")
       return { handled: true, answer: browsing.summary };
-    if (browsing?.type === "compound") return null;
+    if (browsing?.type === "compound" || launching?.type === "compound")
+      return null;
+    let installed;
+    if (
+      !computing &&
+      launching?.type === "open" &&
+      desktop.resolveApp &&
+      (!browsing ||
+        /^(?:spotify|discord|netflix|outlook|chatgpt)$/i.test(launching.app))
+    ) {
+      try {
+        installed = await desktop.resolveApp(launching.app, {
+          signal: context.signal,
+        });
+      } catch (error) {
+        context.signal?.throwIfAborted();
+        return { handled: true, answer: error.message };
+      }
+    }
     if (computing) {
       action = "desktop";
       args = computing;
+    } else if (
+      launching?.type === "open" &&
+      (installed || launching.explicit || !browsing) &&
+      (!launching.passThroughIfMissing || installed)
+    ) {
+      action = "desktop";
+      args = { operation: "open_app", app: installed?.id || launching.app };
     } else if (browsing?.type === "open") {
       action = "browser";
-      args = { operation: "open", url: browsing.url };
+      args = {
+        operation: "open",
+        url: browsing.url,
+        ...(browsing.engine ? { engine: browsing.engine } : {}),
+      };
     } else if (browsing?.type === "read") {
       action = "browser";
       args = { operation: "read" };
@@ -933,22 +1001,12 @@ export function createWorkbench({
     ) {
       action = "browser";
       args = { operation: "read" };
-    } else if (
-      /^open (?:the )?(notepad|calculator|explorer|edge)(?: app)?[?!.]*$/i.test(
-        q,
-      )
-    ) {
-      action = "desktop";
-      args = {
-        operation: "open_app",
-        app: q.match(/notepad|calculator|explorer|edge/i)[0].toLowerCase(),
-      };
     } else return null;
-    if (!context.profileId)
+    if (!context.profileId && !sharedComputerAction(action, args))
       return {
         handled: true,
         answer:
-          "Choose your roommate profile before using personal Workbench tools.",
+          "For personal files, saved memory or background tasks, choose your name in the profile menu. Opening apps and websites works with Shared profile.",
       };
     const readOnly =
       ["files.list", "files.history", "tasks.list", "routines.list"].includes(
@@ -956,7 +1014,7 @@ export function createWorkbench({
       ) ||
       (action === "memory" && args.action === "list") ||
       (action === "desktop" &&
-        ["list_windows", "get_audio"].includes(args.operation)) ||
+        ["list_windows", "list_apps", "get_audio"].includes(args.operation)) ||
       (action === "browser" && args.operation === "read");
     const tool =
       action === "browser"
@@ -1002,7 +1060,6 @@ export function createWorkbench({
     }
   }
   async function tools(context) {
-    if (!context.profileId) return [];
     const tool = (
       name,
       description,
@@ -1145,8 +1202,11 @@ export function createWorkbench({
       ),
       tool(
         "open_managed_browser",
-        "Open a URL in the isolated profile browser. Executes directly when approval is disabled; otherwise queues for review.",
-        { url: string(2000) },
+        "Open a URL and bring the isolated browser window forward on the Jarvis computer. Select Edge or Chrome when requested; otherwise reuse the last browser. Reports actual URL and foreground outcome.",
+        {
+          url: string(2000),
+          engine: { type: "string", enum: ["edge", "chrome"] },
+        },
         ["url"],
         "browser",
         (a) => ({ operation: "open", ...a }),
@@ -1190,16 +1250,22 @@ export function createWorkbench({
       ),
       tool(
         "open_computer_app",
-        "Open an approved computer app. Executes directly when approval is disabled; otherwise queues for review.",
+        "Open or switch to an installed Windows app by its Start menu name. Reuses an existing window and verifies foreground focus. Executes directly when approval is disabled.",
         {
-          app: {
-            type: "string",
-            enum: ["notepad", "calculator", "explorer", "edge"],
-          },
+          app: string(160),
         },
         ["app"],
         "desktop",
         (a) => ({ operation: "open_app", ...a }),
+      ),
+      tool(
+        "list_installed_apps",
+        "Read the actual installed Windows app names and IDs. Use these names with open_computer_app; never invent executable paths or launch arguments.",
+        {},
+        [],
+        "desktop",
+        () => ({ operation: "list_apps" }),
+        true,
       ),
       tool(
         "read_computer_windows",
@@ -1351,20 +1417,22 @@ export function createWorkbench({
         ["channelId", "message"],
         "discord.send",
       ),
-    ].map((item) =>
-      item.name === "schedule_routine"
-        ? {
-            ...item,
-            check: (_args, question) =>
-              /\b(?:set|create|schedule|remind|give|read|tell|send|show|start|make)\b/i.test(
-                question,
-              ) &&
-              /\b(?:routine|every|each|daily|weekly|weekdays|monthly|startup|idle)\b/i.test(
-                question,
-              ),
-          }
-        : item,
-    );
+    ]
+      .filter((item) => context.profileId || sharedToolNames.has(item.name))
+      .map((item) =>
+        item.name === "schedule_routine"
+          ? {
+              ...item,
+              check: (_args, question) =>
+                /\b(?:set|create|schedule|remind|give|read|tell|send|show|start|make)\b/i.test(
+                  question,
+                ) &&
+                /\b(?:routine|every|each|daily|weekly|weekdays|monthly|startup|idle)\b/i.test(
+                  question,
+                ),
+            }
+          : item,
+      );
   }
   return {
     status,

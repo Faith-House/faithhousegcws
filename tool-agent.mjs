@@ -1,10 +1,11 @@
 import { commonToolPlan } from './common-tool-plan.mjs';
 import { isBrowserRequest } from './browser-intents.mjs';
+import { appIntent } from './navigation-intents.mjs';
 import { isSearchRequest } from './web-search.mjs';
 import { createHash } from 'node:crypto';
 
 const request = /^(?:(?:hey\s+)?jarvis[,:\s]*)?(?:(?:please|okay|ok)\s+)?(?:(?:can|could|would|will)\s+(?:you|we)\s+)?(?:i (?:want|need|would like)|i'd like|let'?s|show|open|close|hide|switch|go|bring|take|put|get|lose|remove|ditch|make|give|start|stop|cancel|set|check|turn|dim|brighten|mute|unmute|pause|resume|remind|tell|display|pull|help|mark|assign|finish|complete|reopen)\b/i;
-export const isToolRequest = text => request.test(text.trim()) || /\b(?:chores?|housework)\b/i.test(text) || /\b(?:finished|did|cleaned|washed|took out)\b.*\b(?:dishes|trash|recycling|bathroom|kitchen)\b/i.test(text) || /\b(?:too dark|too bright|internet (?:slow|down)|wi-?fi (?:slow|down)|what (?:time|day)|what(?:'s| is) on my|how (?:much|long).*timer)\b/i.test(text);
+export const isToolRequest = text => Boolean(appIntent(text)) || isBrowserRequest(text) || request.test(text.trim()) || /\b(?:chores?|housework)\b/i.test(text) || /\b(?:finished|did|cleaned|washed|took out)\b.*\b(?:dishes|trash|recycling|bathroom|kitchen)\b/i.test(text) || /\b(?:too dark|too bright|internet (?:slow|down)|wi-?fi (?:slow|down)|what (?:time|day)|what(?:'s| is) on my|how (?:much|long).*timer)\b/i.test(text);
 export const isCompoundToolRequest = text => /(?:\b(?:and(?: then| also)?|then|also)\s+|;\s*)(?:(?:please|could you|can you)\s+)?(?:show|open|close|hide|switch|bring|give|start|stop|cancel|set|check|turn|dim|mute|pause|remind|tell|pull|go|add|create|assign|mark|complete|finish|reopen|what(?:'s| is)|how (?:is|about))\b/i.test(text);
 
 const blocked = text => /\b(?:don't|do not|never|shouldn't|wouldn't)\b|^(?:if|imagine|suppose|explain|how (?:do|can|would|to))\b/i.test(text.replaceAll('’', "'").trim());
@@ -54,7 +55,7 @@ function relevantTools(tools, question) {
   if (isBrowserRequest(question)||/\bbrowser\b/.test(q)) include('open_managed_browser','read_managed_browser','control_managed_browser');
   if(/\b(?:computer|laptop|desktop|pc)\b/.test(q)&&/\b(?:volume|brightness|mute|windows|apps|type|click|scroll|focus|shortcut|screenshot)\b/.test(q))include('read_computer_windows','control_computer');
   if(/\b(?:tasks?|jobs?|research|code proposal)\b/.test(q)&&/\b(?:cancel|resume|steer|finish|refine|stop)\b/.test(q))include('list_background_tasks','change_background_task');
-  if (/\b(?:notepad|calculator|explorer|edge|open.*app)\b/.test(q)) include('open_computer_app','read_computer_windows','control_computer');
+  if (appIntent(question)||/\b(?:notepad|calculator|explorer|edge|open.*app)\b/.test(q)) include('list_installed_apps','open_computer_app','read_computer_windows','control_computer');
   if (/\bdiscord\b/.test(q)&&/\b(?:send|post|message)\b/.test(q)) include('send_discord_message');
   if (isCompoundToolRequest(question)) {
     if (/\bremind(?:er|ers)?\b/.test(q)) include('create_reminder', 'list_reminders', 'cancel_reminder');

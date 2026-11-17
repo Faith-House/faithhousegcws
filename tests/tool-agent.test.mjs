@@ -13,6 +13,21 @@ const answer = data => ({ ok: true, json: async () => ({ message: { content: JSO
 const context = question => ({ room: 'bedroom-1', profileId: 'cooper', question, view: 'minimal', timeZone: 'America/Chicago' });
 const parameter = { type: 'object', properties: { seconds: { type: 'integer', minimum: 1, maximum: 86400 } }, required: ['seconds'] };
 
+test('compound app navigation retains installed-app tools alongside household controls', async () => {
+  const actions = [];
+  const agent = createToolAgent({ model: 'test', base: 'http://127.0.0.1', tools: async () => [
+    { name: 'list_installed_apps', description: 'Installed apps', readOnly: true, parameters: { properties: {} }, execute: async () => ({ok:true,summary:'Word is installed.'}) },
+    { name: 'open_computer_app', description: 'Launch an installed app', parameters: { properties: { app: { type:'string' } }, required:['app'] }, execute: async a => { actions.push(a.app); return {ok:true,summary:'Word is in front.'}; } },
+    { name: 'set_view', description: 'Household dashboard', parameters: { properties: { view: { type:'string' } }, required:['view'] }, execute: async a => { actions.push(a.view); return {ok:true,summary:'Dashboard shown.'}; } },
+  ], fetchImpl: async (_url, options) => {
+    const messages=JSON.parse(options.body).messages;
+    assert.match(messages[0].content,/list_installed_apps/);assert.match(messages[0].content,/open_computer_app/);
+    return answer(plan([call('open_computer_app',{app:'Word'}),call('set_view',{view:'dashboard'})]));
+  } });
+  const result=await agent.run(context('Launch Word and show the dashboard'));
+  assert.equal(result.handled,true);assert.deepEqual(actions,['Word','dashboard']);
+});
+
 test('device tool keeps the approved alias/operation limits and propagates unconfirmed results', async () => {
   const factory = createHouseTools({ homeAssistant: { status: async () => ({ configured: true, exposedDevices: [{ label: 'Desk lamp', aliases: ['desk lamp'], operations: ['brightness'] }] }), handle: async () => ({ ok: false, answer: 'Device did not confirm.' }) } });
   const tool = (await factory(context('Dim the desk lamp'))).find(tool => tool.name === 'control_device');

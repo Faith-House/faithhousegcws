@@ -10,7 +10,11 @@ See [WORKBENCH.md](WORKBENCH.md) for commands, recovery, background work, direct
 
 Open **Workbench** from the dashboard for managed files, background tasks, routines, computer/browser controls and Discord messages. **Settings → Ask before running commands** selects whether supported commands wait for review or execute immediately. The setting is saved locally and survives restarts. Computer and browser access still have their own enable switches. The Actions page shows actual outcomes in either mode; its recent history clears on restart. Changing to direct execution cancels old pending approvals instead of running them.
 
-Direct execution covers supported computer/browser actions, explicitly requested Discord messages, applying code proposals and running managed JavaScript/Python files. Existing workspace boundaries, application aliases, configured Discord channels, process limits and file-change checks still apply. Code generation produces draft files; applying or running them is a separate command. Running a file uses the Windows account’s permissions. Calendar event confirmations remain part of calendar setup and are separate from Workbench execution settings.
+Direct execution covers supported computer/browser actions, explicitly requested Discord messages, applying code proposals and running managed JavaScript/Python files. Existing workspace boundaries, installed Windows app entries, configured Discord channels, process limits and file-change checks still apply. Code generation produces draft files; applying or running them is a separate command. Running a file uses the Windows account’s permissions. Calendar event confirmations remain part of calendar setup and are separate from Workbench execution settings.
+
+Say **“Open Word,” “Switch to Calculator,”** or **“Open YouTube in Chrome.”** Jarvis launches or reuses the requested app, navigates to websites in Edge or Chrome and checks foreground focus on the central computer. The Computer page lists installed app names. Failed or unfocused actions are reported honestly. These same commands work through linked Discord accounts and paired phone access; they operate the computer running Jarvis.
+
+App and website commands also work with **Shared profile**; shared browser sessions are separate for each room. Use the dashboard’s **Using** menu for personal files or saved preferences. A failed voice match preserves a manually chosen profile while an unknown speaker never inherits the previous person recognized by voice.
 
 ## Start
 

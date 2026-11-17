@@ -11,7 +11,7 @@ import { createWorkbenchStore } from "../workbench-data.mjs";
 import { validateArguments } from "../tool-agent.mjs";
 import http from "node:http";
 
-async function directFixture() {
+async function directFixture(rooms = ["bedroom-1"]) {
   const directory = await mkdtemp(path.join(tmpdir(), "jarvis-direct-")),
     calls = [];
   const workbench = createWorkbench({
@@ -20,7 +20,7 @@ async function directFixture() {
       get: async (id) => (id === "cooper" ? { id } : null),
       list: async () => ({ profiles: [{ id: "cooper", name: "Cooper" }] }),
     },
-    rooms: ["bedroom-1"],
+    rooms,
     systemHealth: { read: async () => ({}) },
     desktop: () => ({
       status: () => ({ available: true }),
@@ -156,7 +156,11 @@ test("desktop arguments cannot substitute a different action or protected proces
       const script = Buffer.from(args.at(-1), "base64").toString("utf16le");
       const encoded = script.match(/^\$Payload='([A-Za-z0-9+/=]+)'/)[1];
       payload = JSON.parse(Buffer.from(encoded, "base64").toString());
-      const stdout = JSON.stringify({ outcome: "confirmed", windows: [] });
+      const stdout = JSON.stringify({
+        outcome: "confirmed",
+        windows: [],
+        apps: [],
+      });
       return {
         code: 0,
         stdout,
@@ -170,7 +174,7 @@ test("desktop arguments cannot substitute a different action or protected proces
   assert.equal(payload.protectedPid, process.pid);
   await assert.rejects(
     adapter.run("open_app", { app: "powershell" }),
-    /approved app aliases/,
+    /couldn’t find/,
   );
 });
 
@@ -250,6 +254,75 @@ test("direct mode runs desktop, browser and requested messaging without creating
       f.workbench.approvals.resolve(desktop.executionId, true),
       /already used/,
     );
+    assert.equal(f.calls.length, 3);
+  } finally {
+    await f.workbench.close();
+  }
+});
+
+test("Shared can open apps and isolated room browsers without receiving personal tools or files", async () => {
+  const f = await directFixture(["bedroom-1", "bedroom-2"]);
+  try {
+    await f.workbench.settings({
+      desktopEnabled: true,
+      browserEnabled: true,
+      requireApproval: false,
+    });
+    const shared = { room: "bedroom-1", profileId: null };
+    const opened = await f.workbench.handle("Open Calculator", shared);
+    assert.equal(opened.result.outcome, "unverified");
+    assert.equal(f.calls[0].operation, "open_app");
+    const browser = await f.workbench.handle(
+      "Open YouTube in a browser",
+      shared,
+    );
+    assert.equal(browser.result.outcome, "confirmed");
+    assert.equal(f.calls[1].profileId, "shared--bedroom-1");
+    await f.workbench.handle("Open YouTube in a browser", {
+      room: "bedroom-2",
+      profileId: null,
+    });
+    assert.equal(f.calls[2].profileId, "shared--bedroom-2");
+    assert.match(
+      (await f.workbench.handle("Show my workspace files", shared)).answer,
+      /choose your name/i,
+    );
+    for (const action of ["files.list", "memory", "tasks.list", "vision"]) {
+      await assert.rejects(
+        f.workbench.dispatch({ ...shared, action, args: {} }),
+        /Choose a current roommate profile/,
+      );
+    }
+    await assert.rejects(
+      f.workbench.dispatch({
+        ...shared,
+        action: "desktop",
+        args: { operation: "screenshot" },
+      }),
+      /Choose a current roommate profile/,
+    );
+    await assert.rejects(
+      f.workbench.dispatch({
+        ...shared,
+        action: "browser",
+        args: { operation: "screenshot" },
+      }),
+      /Choose a current roommate profile/,
+    );
+    await assert.rejects(
+      f.workbench.dispatch({
+        ...shared,
+        profileId: "missing",
+        action: "desktop",
+        args: { operation: "open_app", app: "calculator" },
+      }),
+      /Choose a current roommate profile/,
+    );
+    const names = (await f.workbench.tools(shared)).map((t) => t.name);
+    assert(names.includes("open_computer_app"));
+    assert(names.includes("open_managed_browser"));
+    assert(!names.includes("remember_fact"));
+    assert(!names.includes("read_workspace_file"));
     assert.equal(f.calls.length, 3);
   } finally {
     await f.workbench.close();

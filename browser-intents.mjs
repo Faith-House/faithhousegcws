@@ -1,3 +1,4 @@
+import { navigationRequest } from "./navigation-intents.mjs";
 const sites = new Map(
   Object.entries({
     youtube: "https://www.youtube.com/",
@@ -11,10 +12,11 @@ const sites = new Map(
     amazon: "https://www.amazon.com/",
     gmail: "https://mail.google.com/",
     spotify: "https://open.spotify.com/",
+    discord: "https://discord.com/app",
+    outlook: "https://outlook.live.com/",
+    chatgpt: "https://chatgpt.com/",
   }),
 );
-const request =
-  /^(?:open|launch|visit|navigate(?: to)?|go to|take me to|pull up|bring up|show(?: me)?)\s+(.+)$/i;
 export function browserIntent(question) {
   if (typeof question !== "string" || question.length > 24000) return null;
   let q = question
@@ -37,44 +39,23 @@ export function browserIntent(question) {
     )
   )
     return { type: "read" };
-  const match = q.match(request);
-  if (!match) return null;
-  let target = match[1].trim().replace(/\s+(?:for me|please)[?!.]*$/i, ""),
-    hint = /\b(?:browser|website|web page)\b/i.test(target);
-  if (
-    /\b(?:and(?: then| also)?|then)\s+(?:open|launch|show|start|set|check|go|visit|turn)\b/i.test(
-      target,
-    )
-  ) {
+  const request = navigationRequest(question);
+  if (!request || request.explicitApp) return null;
+  const { target, compound, explicitBrowser: hint, engine } = request;
+  const options = engine ? { engine } : {};
+  if (compound) {
     if (
       hint ||
-      /https?:\/\/|youtube|github|google|wikipedia|reddit|twitch|netflix|amazon|gmail|spotify/i.test(
+      /https?:\/\/|youtube|github|google|wikipedia|reddit|twitch|netflix|amazon|gmail|spotify|discord/i.test(
         target,
       )
     )
       return { type: "compound" };
     return null;
   }
-  target = target
-    .replace(
-      /^(?:(?:the|a|my) )?(?:managed )?(?:web )?browser(?: (?:at|to|on|and open))?\s*/i,
-      "",
-    )
-    .replace(
-      /\s+(?:in|using|with|on) (?:a |the |my )?(?:managed )?(?:web )?browser[?!.]*$/i,
-      "",
-    )
-    .replace(
-      /\s+(?:on|using) (?:my |the |this )?(?:computer|laptop|pc)[?!.]*$/i,
-      "",
-    )
-    .replace(/\s+(?:for me|please)[?!.]*$/i, "")
-    .replace(/\s+(?:website|web page)[?!.]*$/i, "")
-    .replace(/^(?:the )(?=\S)/i, "")
-    .trim();
   const alias = target.toLowerCase().replace(/[?!.]+$/, "");
   if (sites.has(alias))
-    return { type: "open", url: sites.get(alias), name: alias };
+    return { type: "open", url: sites.get(alias), name: alias, ...options };
   if (/^[a-z][a-z\d+.-]*:\/\//i.test(target) && !/^https?:\/\//i.test(target))
     return {
       type: "clarify",
@@ -95,7 +76,7 @@ export function browserIntent(question) {
           type: "clarify",
           summary: "Use a website address without embedded login details.",
         };
-      return { type: "open", url: url.href, name: url.hostname };
+      return { type: "open", url: url.href, name: url.hostname, ...options };
     } catch {
       return {
         type: "clarify",

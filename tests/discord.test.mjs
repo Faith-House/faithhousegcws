@@ -138,6 +138,14 @@ test('natural household requests reuse real tool bridge only when addressed to J
  service.close();
 });
 
+test('natural app navigation uses the linked household bridge rather than conversational claims',async()=>{
+ const {service,asked}=textFixture();
+ await service.handle(chatMessage('Jarvis, switch to Calculator'));
+ await service.handle(chatMessage('Jarvis, open YouTube in Chrome'));
+ assert.equal(asked.length,2);assert.match(asked[0][2],/switch to Calculator/i);assert.match(asked[1][2],/YouTube in Chrome/i);
+ service.close();
+});
+
 test('pending channel replies are aborted on disconnect and history expires',async()=>{
  let release,started;const began=new Promise(r=>started=r);
  const fixture=textFixture({decide:async request=>{started();await new Promise(r=>release=r);assert.equal(request.signal.aborted,true);return{respond:true,toolRequest:false,answer:'Too late'};}});
