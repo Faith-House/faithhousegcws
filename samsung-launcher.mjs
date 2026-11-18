@@ -112,6 +112,13 @@ export function createSamsungLauncher({ directory, fetchImpl = fetch, WebSocketI
   async function focusBrowser(receiverUrl, options = {}) {
     const config = await saved();
     if (config.launchMethod !== 'home-rest') return { requested: false };
+    options.signal?.throwIfAborted();
+    const requestSignal = options.signal ? AbortSignal.any([options.signal, AbortSignal.timeout(5000)]) : AbortSignal.timeout(5000);
+    const current = await fetchImpl(`http://${config.host}:8001/api/v2/applications/3202010022079`, { redirect:'error', signal:requestSignal })
+      .then(response => response.ok ? response.json() : null).catch(() => null);
+    options.signal?.throwIfAborted();
+    // Re-launching an already foreground browser can replace its current tab with the start page.
+    if (current?.running === true && current.visible === true) return { requested:false, browserVisible:true, navigationConfirmed:false };
     return launchBrowser(receiverUrl, { ...options, foregroundOnly: true });
   }
   async function enterReceiverUrl(receiverUrl, { signal } = {}) {

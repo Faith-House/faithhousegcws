@@ -61,10 +61,11 @@ test('the Samsung Home and REST launcher opens the browser without confusing for
  await writeFile(path.join(dir,'samsung-tv.json'),JSON.stringify({host:'192.168.1.20',token:'fake-test-token',launchMethod:'home-rest'}));
  await writeFile(path.join(dir,'samsung-tv-certificate.pem'),rootCertificates[0]);
  class Socket extends EventEmitter{constructor(){super();queueMicrotask(()=>this.emit('message',Buffer.from(JSON.stringify({event:'ms.channel.connect'}))));}send(data){sent.push(JSON.parse(data));}terminate(){}}
- let polls=0;
+ let polls=0,covered=false;
  const remote=createSamsungLauncher({directory:dir,WebSocketImpl:Socket,wait:async()=>{},fetchImpl:async(url,options)=>{
   requests.push({url,method:options.method||'GET'});
-  return new Response(JSON.stringify(options.method==='POST'?true:{id:'3202010022079',running:true,visible:++polls>1}),{headers:{'Content-Type':'application/json'}});
+  if(options.method==='POST')covered=false;
+  return new Response(JSON.stringify(options.method==='POST'?true:{id:'3202010022079',running:true,visible:!covered&&++polls>1}),{headers:{'Content-Type':'application/json'}});
  }});
  const result=await remote.launchBrowser('http://192.168.1.5:3211/');
  assert.equal(sent[0].params.DataOfCmd,'KEY_HOME');
@@ -72,7 +73,10 @@ test('the Samsung Home and REST launcher opens the browser without confusing for
  assert.ok(requests.every(r=>r.url==='http://192.168.1.20:8001/api/v2/applications/3202010022079'));
  assert.equal(result.browserVisible,true);assert.equal(result.navigationConfirmed,false);
  assert.equal((await remote.status()).launchMethod,'home-rest');
- const before=sent.length;await remote.focusBrowser('http://192.168.1.5:3211/');assert.equal(sent.length,before,'bringing an existing page forward must not flash the Home screen');assert.equal(requests.filter(r=>r.method==='POST').length,2);
+ const before=sent.length;
+ const existing=await remote.focusBrowser('http://192.168.1.5:3211/');assert.equal(existing.requested,false);assert.equal(sent.length,before);assert.equal(requests.filter(r=>r.method==='POST').length,1,'a foreground browser must keep its current tab');
+ covered=true;
+ await remote.focusBrowser('http://192.168.1.5:3211/');assert.equal(sent.length,before,'bringing a covered page forward must not flash the Home screen');assert.equal(requests.filter(r=>r.method==='POST').length,2);
  const aborted=new AbortController();aborted.abort(Error('cancelled'));
  await assert.rejects(remote.launchBrowser('http://192.168.1.5:3211/',{signal:aborted.signal}),/cancelled/);
  assert.equal(sent.length,1);
